@@ -167,16 +167,19 @@
 
 ### T9: Gmail の OAuth と XOAUTH2 でのログイン
 
+> 状態: 🐧 済 (AccountKit のテスト 19 件、XOAUTH2 のテスト 3 件) / 🍎 実際の Google での確認待ち。方式は「デスクトップ アプリ」用クライアント + ブラウザ + 127.0.0.1 で受け取る形に決めた (SPEC 2 章)。アプリのログイン画面は T12 で作る
+
 **説明:** Google Cloud での OAuth の設定手順を `docs/google-oauth-setup.md` に書く (「本番」状態にする手順を含む)。`AccountKit` に、PKCE を使った認可 URL の組み立て、トークンの取得と更新、`SecretStore` プロトコルを作る。キーチェーンの実装 (`AccountKitKeychain`) と、`ASWebAuthenticationSession` でログイン画面を出す処理も作る。`MailCore` の IMAP は XOAUTH2 でもログインできるようにする。
 
 **受け入れ条件:**
-- [ ] トークンの更新とエラー (取り消された、期限切れ) の扱いを、テストで確認できる
-- [ ] トークンはキーチェーンにだけ保存され、ログに出ない
+- [x] トークンの更新とエラー (取り消された、期限切れ) の扱いを、テストで確認できる
+- [x] トークンはキーチェーンにだけ保存され、ログに出ない
 - [ ] 「テスト」状態ではなく「本番」状態で、1 週間後もログインし直さずに使える
 
 **確認:**
-- [ ] 🐧 `swift test --package-path Packages/AccountKit`
+- [x] 🐧 `swift test --package-path Packages/AccountKit`
 - [ ] 🍎 オーナーが手順書どおりに Google Cloud を設定し、`cozymail-probe --gmail` で Gmail の受信トレイの件名が 20 件出る
+- [ ] 🍎 キーチェーンへの保存 (`KeychainSecretStore`) が Mac で動く (CI の macOS でビルドは確認)
 
 **依存:** T7
 **触るファイル:** `docs/google-oauth-setup.md`、`Packages/AccountKit/Sources/AccountKit/OAuth.swift`、`SecretStore.swift`、`Packages/AccountKit/Sources/AccountKitKeychain/KeychainSecretStore.swift`、`Packages/MailCore/Sources/MailCore/IMAP/XOAuth2.swift`

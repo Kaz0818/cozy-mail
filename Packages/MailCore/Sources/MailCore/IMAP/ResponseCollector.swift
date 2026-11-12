@@ -72,6 +72,10 @@ final class ResponseCollector: ChannelInboundHandler, @unchecked Sendable {
             case let .no(text), let .bad(text):
                 pending.promise.fail(IMAPError.commandFailed(text.text))
             }
+        case .authenticationChallenge:
+            // XOAUTH2 の失敗時、サーバーは理由 (JSON) を送ってきて空の返事を待つ。返事をすると NO が届く。
+            let reply = IMAPClientHandler.Message.part(.continuationResponse(context.channel.allocator.buffer(capacity: 0)))
+            context.writeAndFlush(NIOAny(reply), promise: nil)
         case let .fatal(text):
             // LOGOUT への BYE は正常なので、命令の結果を待つ
             if current == nil { fail(IMAPError.commandFailed(text.text)) }

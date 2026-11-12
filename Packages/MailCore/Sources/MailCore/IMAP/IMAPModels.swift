@@ -25,13 +25,15 @@ public struct IMAPServer: Sendable, Hashable {
     }
 }
 
-/// ログインに使う情報。パスワードは説明文 (`description`) に出さない。
+/// ログインに使う情報。パスワードやトークンは説明文 (`description`) に出さない。
 public enum IMAPCredentials: Sendable, CustomStringConvertible {
     case password(username: String, password: String)
+    /// Gmail などの OAuth 2.0。`AUTHENTICATE XOAUTH2` でログインする。
+    case oauth2(username: String, accessToken: String)
 
     public var username: String {
         switch self {
-        case let .password(username, _): username
+        case let .password(username, _), let .oauth2(username, _): username
         }
     }
 

@@ -80,10 +80,20 @@ private final class FakeIMAPHandler: ChannelInboundHandler {
         }
     }
 
+    private var lastTag = ""
+
     private func handle(_ line: String, context: ChannelHandlerContext) {
-        guard let space = line.firstIndex(of: " ") else { return }
-        let tag = String(line[..<space])
-        let command = String(line[line.index(after: space)...])
+        let tag: String
+        let command: String
+        if let space = line.firstIndex(of: " ") {
+            tag = String(line[..<space])
+            command = String(line[line.index(after: space)...])
+            lastTag = tag
+        } else {
+            // 認証の途中で送られる、タグのない続きの行 (空行を含む)
+            tag = lastTag
+            command = "<continuation>\(line)"
+        }
         log.append(command)
         let replies = respond(command).map { $0.replacingOccurrences(of: "TAG", with: tag) }
         send(replies, context: context)

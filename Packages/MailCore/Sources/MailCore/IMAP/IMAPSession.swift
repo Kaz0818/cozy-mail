@@ -55,13 +55,21 @@ public actor IMAPSession {
     }
 
     private func login(_ credentials: IMAPCredentials) async throws(IMAPError) {
-        switch credentials {
+        let command: Command = switch credentials {
         case let .password(username, password):
-            do {
-                _ = try await run(.login(username: username, password: password))
-            } catch let .commandFailed(reason) {
-                throw .authenticationFailed(reason)
-            }
+            .login(username: username, password: password)
+        case let .oauth2(username, accessToken):
+            .authenticate(
+                mechanism: AuthenticationMechanism("XOAUTH2"),
+                initialResponse: InitialResponse(ByteBuffer(string: XOAuth2.initialResponse(
+                    username: username, accessToken: accessToken
+                )))
+            )
+        }
+        do {
+            _ = try await run(command)
+        } catch let .commandFailed(reason) {
+            throw .authenticationFailed(reason)
         }
     }
 

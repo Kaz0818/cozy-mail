@@ -174,6 +174,49 @@ import Testing
         }
     }
 
+    @Test func xoauth2SendsTheBearerTokenAsInitialResponse() async throws {
+        let script: FakeIMAPServer.Responder = { command in
+            if command.uppercased().hasPrefix("AUTHENTICATE XOAUTH2") { return ["TAG OK Success"] }
+            return standardScript(command)
+        }
+        try await withServer(script) { server in
+            let session = try await IMAPSession.connect(
+                to: IMAPServer(host: "127.0.0.1", port: server.port, security: .plaintextForTesting),
+                credentials: .oauth2(username: "me@gmail.com", accessToken: "ya29.token")
+            )
+            await session.logout()
+            let expected = Data("user=me@gmail.com\u{01}auth=Bearer ya29.token\u{01}\u{01}".utf8).base64EncodedString()
+            #expect(server.receivedCommands.first == "AUTHENTICATE XOAUTH2 \(expected)")
+        }
+    }
+
+    @Test func xoauth2FailureAnswersTheChallengeAndThrowsAuthenticationFailed() async throws {
+        let errorJSON = Data(#"{"status":"400","schemes":"Bearer","scope":"https://mail.google.com/"}"#.utf8)
+        let script: FakeIMAPServer.Responder = { command in
+            if command.uppercased().hasPrefix("AUTHENTICATE XOAUTH2") { return ["+ \(errorJSON.base64EncodedString())"] }
+            if command.hasPrefix("<continuation>") { return ["TAG NO [AUTHENTICATIONFAILED] Invalid credentials (Failure)"] }
+            return standardScript(command)
+        }
+        try await withServer(script) { server in
+            let error = await #expect(throws: IMAPError.self) {
+                _ = try await IMAPSession.connect(
+                    to: IMAPServer(host: "127.0.0.1", port: server.port, security: .plaintextForTesting),
+                    credentials: .oauth2(username: "me@gmail.com", accessToken: "expired-token-xyz")
+                )
+            }
+            #expect(error == .authenticationFailed("Invalid credentials (Failure)"))
+            #expect(!String(describing: error).contains("expired-token-xyz"))
+            #expect(server.receivedCommands.last == "<continuation>")
+        }
+    }
+
+    @Test func credentialsDescriptionNeverContainsSecrets() {
+        let password = IMAPCredentials.password(username: "u", password: "p4ssw0rd")
+        let token = IMAPCredentials.oauth2(username: "u", accessToken: "ya29.secret")
+        #expect(!String(describing: password).contains("p4ssw0rd"))
+        #expect(!String(describing: token).contains("ya29.secret"))
+    }
+
     @Test func publicServerInitializerAlwaysUsesTLS() {
         let server = IMAPServer(host: "imap.mail.yahoo.co.jp")
         #expect(server.port == 993)

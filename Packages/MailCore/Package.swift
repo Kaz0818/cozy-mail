@@ -12,6 +12,8 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-nio-imap.git", from: "0.4.0"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.80.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.29.0"),
+        // 確認用ツールの Gmail ログインだけで使う (MailCore 本体は AccountKit に依存しない)
+        .package(path: "../AccountKit"),
     ],
     targets: [
         .target(
@@ -23,7 +25,10 @@ let package = Package(
                 .product(name: "NIOSSL", package: "swift-nio-ssl"),
             ]
         ),
-        .executableTarget(name: "cozymail-probe", dependencies: ["MailCore"]),
+        .executableTarget(
+            name: "cozymail-probe",
+            dependencies: ["MailCore", .product(name: "AccountKit", package: "AccountKit")]
+        ),
         .testTarget(
             name: "MailCoreTests",
             dependencies: [

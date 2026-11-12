@@ -7,3 +7,7 @@ COZYMAIL_BUNDLE_ID = com.yourname.cozymail
 // 無料の Apple ID で署名したいときだけ、Xcode の Personal Team の ID を入れる
 // DEVELOPMENT_TEAM = ABCDE12345
 // CODE_SIGN_IDENTITY = Apple Development
+
+// Google ログイン (docs/google-oauth-setup.md)
+COZYMAIL_GOOGLE_CLIENT_ID =
+COZYMAIL_GOOGLE_CLIENT_SECRET =

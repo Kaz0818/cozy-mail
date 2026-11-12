@@ -74,7 +74,7 @@
 | 受信 | IMAP (全アカウント共通)。新着は IMAP IDLE ですぐ受け取る。Gmail は独自拡張 `X-GM-LABELS` / `X-GM-THRID` / `X-GM-MSGID` / `X-GM-RAW` も使う | 1 つの仕組みで Gmail 以外にも対応できる |
 | 送信 | SMTP (全アカウント共通) | 同上 |
 | IMAP / SMTP 実装 | Apple の [`swift-nio-imap`](https://github.com/apple/swift-nio-imap) を土台に、薄いクライアントを自作。SMTP は SwiftNIO 上に自作 | Apple が保守していて Swift Concurrency と合う |
-| ログイン | Gmail: OAuth 2.0 (PKCE) + XOAUTH2、`ASWebAuthenticationSession`。その他: アプリパスワード | パスワードを預からずに済む |
+| ログイン | Gmail: OAuth 2.0 (PKCE) + XOAUTH2。Google の「デスクトップ アプリ」用 OAuth クライアントを使い、既定のブラウザでログインして、結果を 127.0.0.1 で受け取る (RFC 8252)。その他: アプリパスワード | パスワードを預からずに済む。確認用ツールとアプリで同じ仕組みを使え、ブラウザでログイン済みの Google アカウントから選べる |
 | Mac 内の保存 | SwiftData。添付ファイルはファイルとして保存 | オフラインで読む・検索するため |
 | 秘密情報 | macOS のキーチェーン | |
 | HTML 表示 | `WKWebView` (JavaScript 無効、外部読み込みを制御) | |
@@ -85,7 +85,8 @@
 ### 2.1 署名と配布
 
 - 自分の Mac で使うだけなので、Xcode の「Sign to Run Locally」(または無料の Apple ID) で署名する。**期限はない。**
-- App Sandbox は有効にし、ネットワーク (送受信) とユーザーが選んだファイル (添付の保存) の権限だけを付ける。
+- App Sandbox は有効にし、ネットワーク (送受信と、Google ログインの結果を受け取る 127.0.0.1 の待ち受け) とユーザーが選んだファイル (添付の保存) の権限だけを付ける。
+- Google の OAuth クライアント ID とクライアント シークレットは `Local.xcconfig` に書き、Git に入れない (デスクトップ アプリのシークレットは秘密として扱えないと Google も明言しているが、それでもリポジトリには置かない)。
 - iCloud など、有料の署名が要る機能 (Capability) は使わない。
 - 署名の設定 (チーム ID) は `project.yml` に直接書かず、各自の `Local.xcconfig` (Git に入れない) から読む。
 
