@@ -1,3 +1,4 @@
+import MailStore
 import SwiftUI
 
 @main
@@ -6,18 +7,11 @@ struct CozyMailApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ZStack {
-                AppBackground()
-                Text("Cozy Mail")
-                    .font(.largeTitle.weight(.semibold))
-                    .foregroundStyle(Palette.textPrimary)
-                    .padding(32)
-                    .glassPanel()
-            }
-            .frame(minWidth: 900, minHeight: 600)
-            .onChange(of: themeRawValue, initial: true) {
-                AppTheme.stored(themeRawValue).apply()
-            }
+            // T11 で本物のメールに差し替えるまでは、見本と同じ仮データを出す
+            MainWindow(repository: PreviewMailRepository())
+                .onChange(of: themeRawValue, initial: true) {
+                    AppTheme.stored(themeRawValue).apply()
+                }
         }
 
         Settings {
