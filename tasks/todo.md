@@ -130,15 +130,17 @@
 
 ### T7: IMAP で Yahoo! にログインして見出しを取る
 
+> 状態: 🐧 済 (偽サーバー相手のテスト 8 件) / 🍎 実際の Yahoo! での確認待ち。`swift-nio-imap` 0.4.0 は使いやすく、使い続けて問題なさそう
+
 **説明:** `swift-nio-imap` を使って、TLS で接続し、ログインし、フォルダ一覧 (`LIST`、`SPECIAL-USE`) を取り、受信トレイの最新 20 通の見出し (`UID FETCH`) を取る最小のクライアントを `MailCore` に作る。確認用のコマンドラインのツール `cozymail-probe` からこれを呼べるようにする。パスワードはコマンドの引数ではなく、環境変数か入力で受け取る。
 
 **受け入れ条件:**
-- [ ] 偽の IMAP サーバー相手のテストで、ログイン・フォルダ一覧・見出しの取得が通る
-- [ ] 暗号化なしの接続はできない
-- [ ] ログにパスワードが出ない
+- [x] 偽の IMAP サーバー相手のテストで、ログイン・フォルダ一覧・見出しの取得が通る
+- [x] 暗号化なしの接続はできない
+- [x] ログにパスワードが出ない
 
 **確認:**
-- [ ] 🐧 `swift test --package-path Packages/MailCore`
+- [x] 🐧 `swift test --package-path Packages/MailCore`
 - [ ] 🍎 オーナーが Yahoo! のアプリパスワードで `swift run --package-path Packages/MailCore cozymail-probe imap.mail.yahoo.co.jp <メールアドレス>` を実行し、受信トレイの件名が 20 件出る
 
 **依存:** T1
