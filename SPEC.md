@@ -13,11 +13,11 @@
 
 1. **Mac と iPhone のネイティブアプリ**にする。Web アプリや Electron ではない。
 2. **iOS 26 / macOS 26 以降だけ**に対応する。Liquid Glass の API がこのバージョンからのため。
-3. **使うのはまずオーナー本人だけ**。App Store での公開はしない (TestFlight で自分の端末に入れる)。
+3. **使うのはまずオーナー本人だけ**。App Store での公開も TestFlight での配布もしない。自分の Mac と iPhone に直接入れる。
 4. **自前のサーバーは置かない**。端末が Gmail や Yahoo! のサーバーと直接やりとりする。
 5. **Gmail 以外で最低限つなぎたいのは Yahoo!メール**。iCloud・Outlook・独自ドメインは「つながれば良い」程度。
 6. オーナーは **Mac と Xcode を持っている**、または用意できる。
-7. **Apple Developer Program (年 99 ドル) に加入**できる。iPhone に入れ続けるために必要。
+7. **Apple Developer Program (年 99 ドル) には加入しない**。無料の Apple ID で署名する (詳しくは「2.1 配布と無料署名の制約」)。あとで加入しても、コードは変えずにそのまま使えるようにしておく。
 
 ---
 
@@ -72,11 +72,29 @@
 | IMAP / SMTP 実装 | Apple の [`swift-nio-imap`](https://github.com/apple/swift-nio-imap) を土台に、薄いクライアントを自作。SMTP は SwiftNIO 上に自作 | Apple が保守していて Swift Concurrency と合う |
 | ログイン | Gmail: OAuth 2.0 (PKCE) + XOAUTH2、`ASWebAuthenticationSession`。その他: アプリパスワード | パスワードを預からずに済む |
 | 端末内の保存 | SwiftData。添付ファイルはファイルとして保存 | オフラインで読む・検索するため |
-| 秘密情報 | キーチェーン (iCloud キーチェーンで同期) | |
-| 設定の同期 | `NSUbiquitousKeyValueStore` | |
+| 秘密情報 | キーチェーン (その端末だけに保存。同期しない) | 無料署名では iCloud の機能を使えないため |
+| 設定の同期 | しない。アカウントや設定は Mac と iPhone でそれぞれ登録する | 同上。有料の署名に切り替えたら iCloud での同期を足す (P2) |
 | HTML 表示 | `WKWebView` (JavaScript 無効、外部読み込みを制御) | |
 | テスト | Swift Testing (`import Testing`) | |
 | 書式とチェック | SwiftFormat、SwiftLint | |
+
+### 2.1 配布と無料署名の制約
+
+無料の Apple ID (Xcode の「Personal Team」) で署名する。
+
+| | Mac | iPhone |
+|---|---|---|
+| 入れ方 | Xcode でビルドして、自分の Mac で起動する | Xcode から USB または Wi-Fi で入れる |
+| 期限 | 実質なし | **7 日で起動しなくなる**。[SideStore](https://sidestore.io) を使い、iPhone だけで自動で入れ直す |
+
+この方法に合わせて、次のことを守る。
+
+- **iCloud・プッシュ通知など、有料の署名が要る機能 (Capability) は使わない。** 使うと無料の署名でビルドできなくなる。
+- **アプリの拡張機能 (ウィジェット、共有メニューなど) は作らない (P2)。** 拡張機能 1 つごとにアプリ ID を 1 つ使い、無料の署名ではアプリ ID の数に上限があるため。
+- **バンドル ID は最初に決めたら変えない** (例: `com.<オーナーの名前>.cozymail`)。変えるたびにアプリ ID を新しく使ってしまう。
+- 新着の確認は、iOS のバックグラウンド更新 (`BGAppRefreshTask`) と、端末内で出す通知 (ローカル通知) で行う。どちらも無料の署名で使える。
+- Gmail の OAuth は `ASWebAuthenticationSession` と独自の URL スキームで戻ってくる方式にする。これも無料の署名で使える。
+- 署名の設定 (チーム ID) は `project.yml` に直接書かず、各自の `Local.xcconfig` (Git に入れない) から読む。有料の署名に切り替えるときは、ここを変えるだけにする。
 
 ---
 
@@ -189,7 +207,8 @@ public actor IMAPSession {
 - 新しい外部ライブラリを追加する。
 - SwiftData のモデルを変える (保存済みデータの移行が必要になるため)。
 - 対応 OS のバージョンを変える。
-- Google Cloud / Apple Developer の設定が必要な変更。
+- Google Cloud の設定が必要な変更。
+- 有料の署名 (Apple Developer Program) が必要になる機能を足す。
 - メールを外部に送る機能や、サーバーを置く案。
 
 **絶対にやらない**
@@ -262,7 +281,7 @@ public actor IMAPSession {
 |---|---|---|
 | v0.0 | `design-system` + `mail-ui` (仮データ) | Mac と iPhone シミュレーターで、見本と並べて見た目がほぼ同じ。ライト/ダークが切り替わる |
 | v0.1 | `mail-protocol`, `account-auth`, `mail-store`, `mail-ui`, `compose` の P0 | 実際の Gmail 3 つと Yahoo! 1 つをつないで、US-1〜US-10 の受け入れ条件を満たす |
-| v1.0 | 全モジュールの P1 | TestFlight で配布。オーナーが 2 週間、ほかのメールアプリを使わずに過ごせる |
+| v1.0 | 全モジュールの P1 | Mac と iPhone (SideStore で自動の入れ直し) に入れて、オーナーが 2 週間、ほかのメールアプリを使わずに過ごせる |
 
 ---
 
@@ -285,7 +304,8 @@ public actor IMAPSession {
 | 問い | いまの考え |
 |---|---|
 | Gmail の OAuth をどう用意するか | Google の分類で Gmail の全権限は「制限付き」。Google Cloud で OAuth を「テスト」状態にすると 7 日ごとに再ログインになる。自分用なら「本番」状態 (審査なし、ログイン時に「確認されていないアプリ」の警告が出る、利用者は 100 人まで) で使う。予備として、Gmail もアプリパスワードでつなげるようにする。**これで良いか確認したい。** |
-| 閉じている間の新着通知 | すぐ届けるには中継サーバーが必要で、「サーバーを置かない」とぶつかる。v1.0 までは iOS のバックグラウンド更新 (数十分おき) で様子を見る。 |
+| 閉じている間の新着通知 | すぐ届けるには中継サーバーとプッシュ通知 (有料の署名が必要) が要る。v1.0 までは iOS のバックグラウンド更新 (数十分おき) で様子を見る。 |
+| 7 日ごとの入れ直しに耐えられるか | SideStore で自動化してみて、それでも面倒なら Apple Developer Program への加入を考える。加入してもコードは変えず、署名の設定を変えるだけで済む。 |
 | Gmail を Gmail API でつなぐか | IMAP で足りれば IMAP のまま。足りなければ Gmail だけ API に替えられるよう、事業者ごとの差は `mail-protocol` / `account-auth` の中に閉じこめる。 |
 | Yahoo! 以外に必ず使うアカウントはあるか | 前提 5 のとおり、まずは Yahoo! だけを必須にしている。 |
 | アプリ名 | 仮に「Cozy Mail」。 |
