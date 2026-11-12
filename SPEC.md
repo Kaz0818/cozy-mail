@@ -3,7 +3,7 @@
 > 複数の Gmail と、Gmail 以外のメールアカウントを 1 つの受信トレイで扱える、**Mac 専用**のメールアプリ。
 > Apple の Liquid Glass デザインで、色はティファニーブルー。ライト/ダークを切り替えられる。
 
-- 状態: **下書き — オーナーの承認待ち**
+- 状態: **承認済み (2026-11-12)** — 実装計画は [`tasks/plan.md`](tasks/plan.md)
 - デザインの見本: [`sample-img-light.png`](sample-img-light.png) / [`sample-img-dark.png`](sample-img-dark.png)
 - 書き方: [agent-skills の spec-driven-development](https://github.com/addyosmani/agent-skills) に沿う (仕様 → 計画 → タスク → 実装。各段階でオーナーが確認する)
 
@@ -99,9 +99,10 @@
 # Xcode プロジェクトを生成 (project.yml を変えたら毎回)
 xcodegen generate
 
-# UI に依存しない部分のテスト (Linux でも Mac でも動く)
+# UI に依存しない部分のテスト (Linux でも Mac でも動く。Apple 専用のターゲットは Mac でだけビルドされる)
 swift test --package-path Packages/MailCore
 swift test --package-path Packages/MailStore
+swift test --package-path Packages/AccountKit
 
 # アプリのビルド
 xcodebuild -scheme CozyMail -destination 'platform=macOS' build
@@ -130,8 +131,10 @@ cozy-mail/
 │   ├── MailCore/            → IMAP / SMTP / MIME。UI と OS に依存しない
 │   │   ├── Sources/MailCore/
 │   │   └── Tests/MailCoreTests/   → Fixtures/ に匿名化した実メールを置く
-│   ├── MailStore/           → SwiftData のモデル、同期、オフラインの待ち行列
-│   └── AccountKit/          → OAuth、キーチェーン、事業者ごとのサーバー設定
+│   ├── MailStore/           → 同期、オフラインの待ち行列、保存先の型 (`MessageStore` プロトコル) とメモリ上の実装
+│   │                          SwiftData の実装は Apple 専用のターゲット `MailStoreSwiftData` に分ける
+│   └── AccountKit/          → OAuth、事業者ごとのサーバー設定、秘密情報の型 (`SecretStore` プロトコル)
+│                              キーチェーンの実装は Apple 専用のターゲット `AccountKitKeychain` に分ける
 ├── AppTests/                → 画面の動きのテスト
 ├── docs/                    → 実機確認の手順書など
 ├── SPEC.md                  → この仕様書
@@ -254,7 +257,7 @@ public actor IMAPSession {
 
 ---
 
-## 9. 機能マップ (Capability Map) — 承認待ち
+## 9. 機能マップ (Capability Map) — 承認済み
 
 この仕様は、別々に作ってテストできる機能をいくつも含んでいるため、モジュールに分けて順に作る。各モジュールの詳しい仕様は、このマップが承認されたあと `SPEC-<モジュール id>.md` として書く。
 
@@ -304,7 +307,7 @@ public actor IMAPSession {
 
 | 問い | いまの考え |
 |---|---|
-| Gmail の OAuth をどう用意するか | Google の分類で Gmail の全権限は「制限付き」。Google Cloud で OAuth を「テスト」状態にすると 7 日ごとに再ログインになる。自分用なら「本番」状態 (審査なし、ログイン時に「確認されていないアプリ」の警告が出る、利用者は 100 人まで) で使う。予備として、Gmail もアプリパスワードでつなげるようにする。**これで良いか確認したい。** |
+| ~~Gmail の OAuth をどう用意するか~~ | **決定:** Google Cloud の OAuth を「本番」状態 (審査なし、ログイン時に「確認されていないアプリ」の警告が出る、利用者は 100 人まで) で使う。「テスト」状態は 7 日ごとに再ログインになるので使わない。予備として、Gmail もアプリパスワードでつなげるようにする。 |
 | Gmail を Gmail API でつなぐか | IMAP で足りれば IMAP のまま。足りなければ Gmail だけ API に替えられるよう、事業者ごとの差は `mail-protocol` / `account-auth` の中に閉じこめる。 |
 | Yahoo! 以外に必ず使うアカウントはあるか | 前提 6 のとおり、まずは Yahoo! だけを必須にしている。 |
 | アプリ名 | 仮に「Cozy Mail」。 |
