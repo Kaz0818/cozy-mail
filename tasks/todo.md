@@ -54,14 +54,16 @@
 
 ### T3: メールの型と、仮データの `MailRepository`
 
+> 状態: ✅ 済 (テスト 10 件)
+
 **説明:** 画面が使う型 (`Account`、`Mailbox`、`MessageSummary`、`MessageBody`、`Attachment`) と、画面がデータを取りに行く窓口の `MailRepository` プロトコルを `MailStore` に作る。見本の画像と同じ内容 (山田 さくら、Google、田中 健一 など) を返す仮の実装も作る。
 
 **受け入れ条件:**
-- [ ] 型と `MailRepository` が `MailStore` にあり、`AppKit` / `SwiftData` を import していない
-- [ ] 仮の実装が、見本と同じアカウント 4 つ・メール 6 通・未読数を返す
+- [x] 型と `MailRepository` が `MailStore` にあり、`AppKit` / `SwiftData` を import していない
+- [x] 仮の実装が、見本と同じアカウント 4 つ・メール 6 通・未読数を返す
 
 **確認:**
-- [ ] 🐧 `swift test --package-path Packages/MailStore` (仮の実装の件数と未読数のテスト)
+- [x] 🐧 `swift test --package-path Packages/MailStore` (仮の実装の件数と未読数のテスト)
 
 **依存:** T1
 **触るファイル:** `Packages/MailStore/Sources/MailStore/Models.swift`、`MailRepository.swift`、`PreviewMailRepository.swift`、`Tests/MailStoreTests/PreviewMailRepositoryTests.swift`
