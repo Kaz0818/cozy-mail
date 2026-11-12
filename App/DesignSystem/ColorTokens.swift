@@ -2,11 +2,11 @@ import AppKit
 import SwiftUI
 
 /// 色のトークン (SPEC 8.2)。画面のコードでは色の値を直接書かず、必ずここを通す。
-struct ColorToken: Sendable, Hashable, CustomTestStringConvertible {
+struct ColorToken: Sendable, Hashable, CustomStringConvertible {
     let light: UInt32
     let dark: UInt32
 
-    var testDescription: String {
+    var description: String {
         String(format: "#%06X / #%06X", light, dark)
     }
 
