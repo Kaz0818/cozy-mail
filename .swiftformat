@@ -1,0 +1,8 @@
+--swiftversion 6.0
+--indent 4
+--maxwidth 120
+--wraparguments before-first
+--wrapcollections before-first
+--self remove
+--importgrouping testable-bottom
+--exclude .build,**/.build,DerivedData

@@ -13,15 +13,17 @@
 
 ### T1: プロジェクトの土台
 
+> 状態: 🐧 済 (Linux で `swift test` 3 パッケージ通過) / 🍎 Mac でのビルド未確認
+
 **説明:** XcodeGen の `project.yml`、空のウィンドウが出るだけの Mac アプリ、3 つの Swift パッケージ (`MailCore`、`MailStore`、`AccountKit`) を作る。各パッケージには何もしないテストを 1 つ置く。書式とチェックの設定、`.gitignore`、署名の設定の見本 (`Local.xcconfig.sample`) も作る。あわせて、この作業環境に Swift の Linux 版を入れられるか試す。
 
 **受け入れ条件:**
 - [ ] `xcodegen generate` で `.xcodeproj` ができ、ビルドすると空のウィンドウが出る
-- [ ] 3 つのパッケージの `swift test` が通る
-- [ ] 署名のチーム ID が Git に入っていない (`Local.xcconfig` は `.gitignore` 済み)
+- [x] 3 つのパッケージの `swift test` が通る
+- [x] 署名のチーム ID が Git に入っていない (`Local.xcconfig` は `.gitignore` 済み)
 
 **確認:**
-- [ ] 🐧 `swift test --package-path Packages/MailCore` (Linux 版の Swift が入れられた場合)
+- [x] 🐧 `swift test --package-path Packages/MailCore` (Linux 版の Swift 6.2.3 で確認)
 - [ ] 🍎 `xcodegen generate && xcodebuild -scheme CozyMail -destination 'platform=macOS' build`
 - [ ] 🍎 アプリを起動して、空のウィンドウが出る
 

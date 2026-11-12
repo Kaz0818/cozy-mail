@@ -1,0 +1,9 @@
+// このファイルを Local.xcconfig という名前でコピーして、自分の値を入れる。
+// Local.xcconfig は Git に入れない。
+
+// バンドル ID (一度決めたら変えない)
+COZYMAIL_BUNDLE_ID = com.yourname.cozymail
+
+// 無料の Apple ID で署名したいときだけ、Xcode の Personal Team の ID を入れる
+// DEVELOPMENT_TEAM = ABCDE12345
+// CODE_SIGN_IDENTITY = Apple Development
