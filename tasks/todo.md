@@ -147,15 +147,17 @@
 
 ### T8: MIME の解析
 
+> 状態: ✅ 済 (テスト 17 件、見本メール 12 通)。EUC-JP は Linux の Foundation が対応していないため、Mac でだけ読める (テストは未作成)
+
 **説明:** メールの生データを、件名・差出人・宛先・日時・本文 (テキストと HTML)・添付ファイルに分ける解析器を `MailCore` に作る。RFC 2047 の件名 (`=?ISO-2022-JP?B?...?=` など)、`quoted-printable` / `base64`、`multipart/alternative` と `multipart/mixed` に対応する。
 
 **受け入れ条件:**
-- [ ] 日本語の件名と本文 (`UTF-8`、`ISO-2022-JP`、`Shift_JIS`) が文字化けしない
-- [ ] HTML とテキストの両方を持つメールで、両方を取り出せる
-- [ ] 添付ファイルの名前 (日本語を含む) と中身を取り出せる
+- [x] 日本語の件名と本文 (`UTF-8`、`ISO-2022-JP`、`Shift_JIS`) が文字化けしない
+- [x] HTML とテキストの両方を持つメールで、両方を取り出せる
+- [x] 添付ファイルの名前 (日本語を含む) と中身を取り出せる
 
 **確認:**
-- [ ] 🐧 `swift test --package-path Packages/MailCore` (匿名化したサンプルを `Tests/MailCoreTests/Fixtures/` に 10 通以上)
+- [x] 🐧 `swift test --package-path Packages/MailCore` (匿名化したサンプルを `Tests/MailCoreTests/Fixtures/` に 10 通以上)
 
 **依存:** T1
 **触るファイル:** `Sources/MailCore/MIME/MIMEParser.swift`、`Sources/MailCore/MIME/EncodedWord.swift`、`Sources/MailCore/MIME/Charset.swift`、`Tests/MailCoreTests/MIMEParserTests.swift`、`Tests/MailCoreTests/Fixtures/*.eml`

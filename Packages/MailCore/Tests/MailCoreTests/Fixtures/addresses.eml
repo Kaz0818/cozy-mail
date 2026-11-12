@@ -1,0 +1,12 @@
+From: =?UTF-8?B?5L2Q6JekIOe+juWSsg==?= <m.sato@example.com>
+To: "Tanaka, Kenichi" <k.tanaka@example.com>, plain@example.com,
+ =?UTF-8?B?6Yi05pyo?= <d.suzuki@example.com>
+Cc: <bare@example.com>
+Reply-To: replies@example.com
+Subject: addresses
+Date: Thu, 12 Nov 2026 16:24:00 +0900
+In-Reply-To: <parent@example.com>
+References: <root@example.com>
+ <parent@example.com>
+
+hi

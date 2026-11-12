@@ -9,6 +9,10 @@ let package = Package(
     ],
     targets: [
         .target(name: "MailCore"),
-        .testTarget(name: "MailCoreTests", dependencies: ["MailCore"]),
+        .testTarget(
+            name: "MailCoreTests",
+            dependencies: ["MailCore"],
+            resources: [.copy("Fixtures")]
+        ),
     ]
 )
