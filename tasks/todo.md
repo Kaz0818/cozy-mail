@@ -33,6 +33,8 @@
 
 ### T2: 色のトークン、背景、テーマの切り替え
 
+> 状態: 🐧 コントラストのテストは CI の macOS で確認 / 🍎 見た目の確認待ち。`accent` (ライト) と `accentFill` (ダーク) は AA を満たさなかったので濃くした (SPEC 8.2 も更新)
+
 **説明:** SPEC 8.2 の色をトークンとして定義し、ティファニーブルーの波の背景 (ライト用・ダーク用) と、ガラスの部品 (カプセル形のボタン、色付きガラスの行) を作る。設定で「ライト / ダーク / システムに合わせる」を切り替えられるようにする。
 
 **受け入れ条件:**
@@ -42,7 +44,7 @@
 
 **確認:**
 - [ ] 🍎 SwiftUI プレビューで、ライト/ダーク × 透明度を下げる の 4 通りを見る
-- [ ] 🍎 文字と背景の明るさの差を測り、WCAG AA (4.5:1 以上) を満たす。満たさない色はトークンを直して SPEC も更新する
+- [x] 🍎 文字と背景の明るさの差を測り、WCAG AA (4.5:1 以上) を満たす。満たさない色はトークンを直して SPEC も更新する (`AppTests/ColorTokenTests.swift`)
 
 **依存:** T1
 **触るファイル:** `App/DesignSystem/Colors.swift`、`App/DesignSystem/GlassComponents.swift`、`App/DesignSystem/AppBackground.swift`、`App/Resources/Assets.xcassets`、`App/Features/Settings/AppearanceSettings.swift`

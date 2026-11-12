@@ -233,15 +233,16 @@ public actor IMAPSession {
 | トークン | ライト | ダーク | 使う場所 |
 |---|---|---|---|
 | `brand` | #81D8D0 | #81D8D0 | ロゴ、背景の波、ガラスの色付け |
-| `accent` | #0A8F88 | #6FD3CA | ボタンの文字、リンク、未読の点 |
-| `accentFill` | #81D8D0 | #2A8C85 | 選択中の行、メインのボタン |
+| `accent` | #08736D | #6FD3CA | ボタンの文字、リンク、未読の点 |
+| `accentFill` | #81D8D0 | #1F7A74 | 選択中の行、メインのボタン |
 | `onAccentFill` | #0B2E2C | #FFFFFF | `accentFill` の上の文字 |
 | `background` | #E6F6F4 → #CFEFEB | #071C1C → #0D2B2A | 一番奥の背景 (グラデーション) |
 | `textPrimary` | #0F1F1E | #EAF6F5 | 件名、本文 |
 | `textSecondary` | #4A5F5D | #9DB5B2 | 書き出し、時刻 |
+| `panel` | #F4FBFA | #0F2827 | 「透明度を下げる」のときにガラスの代わりに使う面 |
 | `destructive` | システムの赤 | システムの赤 | 削除 |
 
-- 文字と背景の明るさの差は WCAG AA (普通の文字で 4.5:1 以上)。上の値は目安で、実装時に測って調整する。
+- 文字と背景の明るさの差は WCAG AA (普通の文字で 4.5:1 以上)。T2 で測り、`accent` (ライト) と `accentFill` (ダーク) を濃くした。アプリのテスト (`AppTests/ColorTokenTests.swift`) で毎回確かめる。
 - 色だけで意味を伝えない (未読は太字にもする)。
 
 ### 8.3 画面の形
