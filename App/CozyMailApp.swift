@@ -4,7 +4,8 @@ import SwiftUI
 @main
 struct CozyMailApp: App {
     @AppStorage(AppTheme.storageKey) private var themeRawValue = AppTheme.system.rawValue
-    @State private var service = MailService.live()
+    /// 画面の自動テスト (`-ui-testing` で起動) では、本物のアカウントやキーチェーンに触れないよう、メモリ上だけで動かす。
+    @State private var service = ProcessInfo.processInfo.arguments.contains("-ui-testing") ? MailService.preview() : MailService.live()
 
     var body: some Scene {
         WindowGroup {

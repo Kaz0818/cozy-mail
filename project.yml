@@ -59,6 +59,20 @@ targets:
         SWIFT_VERSION: 6.0
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/Cozy Mail.app/Contents/MacOS/Cozy Mail
         BUNDLE_LOADER: $(TEST_HOST)
+  # 画面の自動テスト。アプリを起動してクリックなどを試す (見本のメールで動かし、本物のアカウントには触れない)
+  CozyMailUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - UITests
+    dependencies:
+      - target: CozyMail
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(COZYMAIL_BUNDLE_ID).uitests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: 6.0
+        TEST_TARGET_NAME: CozyMail
 schemes:
   CozyMail:
     build:
@@ -70,3 +84,4 @@ schemes:
       config: Debug
       targets:
         - CozyMailTests
+        - CozyMailUITests

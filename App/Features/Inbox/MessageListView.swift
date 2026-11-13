@@ -235,6 +235,7 @@ struct MessageRow<MenuItems: View>: View {
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityHint(Text(accountName))
         .accessibilityAction(.default, action)
+        .accessibilityIdentifier("messageRow.\(message.id.rawValue)")
     }
 
     private var primaryText: Color {
