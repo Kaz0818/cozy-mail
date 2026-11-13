@@ -70,6 +70,16 @@ import Testing
         #expect(!inbox[1].summary.isRead)
     }
 
+    @Test func inboxUnreadCountComesFromTheServerIncludingOldMail() async throws {
+        let store = InMemoryMessageStore()
+        // INBOX: 40 日前の未読 (保存しない)、既読 1 通、未読 1 通
+        _ = try await engine(store).sync(account: yahoo, session: await yahooServer())
+
+        #expect(try await store.inboxUnreadCount(account: yahoo.id) == 2)
+        let saved = try await store.messages(account: yahoo.id, mailbox: "INBOX")
+        #expect(saved.filter { !$0.summary.isRead }.count == 1)
+    }
+
     // MARK: - 2 回目以降
 
     @Test func incrementalSyncAddsNewUpdatesFlagsAndRemovesDeleted() async throws {

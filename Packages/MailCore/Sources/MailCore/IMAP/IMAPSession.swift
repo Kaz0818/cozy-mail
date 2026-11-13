@@ -132,6 +132,17 @@ public actor IMAPSession {
         return FetchAssembler.headers(from: responses).sorted { $0.uid > $1.uid }
     }
 
+    /// フォルダの未読数をサーバーに聞く (`STATUS (UNSEEN)`)。フォルダを開かずに聞ける。
+    public func unreadCount(of mailbox: String) async throws(IMAPError) -> Int {
+        let responses = try await run(.status(MailboxName(ByteBuffer(string: mailbox)), [.unseenCount]))
+        for response in responses {
+            if case let .untagged(.mailboxData(.status(_, status))) = response, let unseen = status.unseenCount {
+                return unseen
+            }
+        }
+        throw .unexpectedResponse("STATUS の応答に UNSEEN がありません")
+    }
+
     /// 指定した日付以降に届いたメールの UID を、小さい順に返す (`UID SEARCH SINCE`)。
     /// 日付は `calendar` のタイムゾーンでの日にちとして送る (IMAP の SINCE は時刻を持たない)。
     public func searchUIDs(

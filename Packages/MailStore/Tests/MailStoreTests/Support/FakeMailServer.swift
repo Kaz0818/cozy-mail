@@ -99,6 +99,12 @@ actor FakeMailServer: MailServerSession {
         return result.map { header($0, gmail: includeGmailAttributes) }
     }
 
+    /// 本物の STATUS と同じく、期間に関係なくフォルダ全体の未読を数える。
+    func unreadCount(of mailbox: String) async throws -> Int {
+        calls.append("STATUS \(mailbox)")
+        return try folder(mailbox).messages.filter { !$0.flags.contains("\\Seen") }.count
+    }
+
     func fetchFlags(in mailbox: String, uids: ClosedRange<UInt32>, includeGmailAttributes: Bool) async throws -> [IMAPFetchedHeader] {
         calls.append("FLAGS \(mailbox) \(uids.lowerBound):\(uids.upperBound)")
         return try folder(mailbox).messages.filter { uids.contains($0.uid) }.map {

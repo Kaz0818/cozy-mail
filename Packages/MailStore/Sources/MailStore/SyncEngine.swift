@@ -9,6 +9,8 @@ public protocol MailServerSession: Sendable {
     func fetchHeaders(in mailbox: String, uids: [UInt32], includeGmailAttributes: Bool) async throws -> [IMAPFetchedHeader]
     func fetchHeaders(in mailbox: String, fromUID uid: UInt32, includeGmailAttributes: Bool) async throws -> [IMAPFetchedHeader]
     func fetchFlags(in mailbox: String, uids: ClosedRange<UInt32>, includeGmailAttributes: Bool) async throws -> [IMAPFetchedHeader]
+    /// フォルダ全体の未読数 (`STATUS (UNSEEN)`)。
+    func unreadCount(of mailbox: String) async throws -> Int
 }
 
 extension IMAPSession: MailServerSession {}
@@ -51,13 +53,19 @@ public struct SyncEngine: Sendable {
     }
 
     public func sync(account: Account, session: some MailServerSession) async throws -> Report {
-        let targets = Self.targets(for: account.provider, mailboxes: try await session.listMailboxes())
+        let mailboxes = try await session.listMailboxes()
         var report = Report()
-        for target in targets {
+        for target in Self.targets(for: account.provider, mailboxes: mailboxes) {
             let result = try await sync(target, account: account, session: session)
             report.added += result.added
             report.updated += result.updated
             report.removed += result.removed
+        }
+        // 受信トレイの未読数はサーバーに聞く (保存しているのは最近の分だけなので、数えると古い未読が漏れる)。
+        // Gmail も INBOX を STATUS で聞ける。聞けなくても同期は失敗にしない (保存分で数える)
+        if let inbox = mailboxes.first(where: { $0.isSelectable && $0.rawName.uppercased() == "INBOX" }),
+           let unread = try? await session.unreadCount(of: inbox.rawName) {
+            try await store.setInboxUnreadCount(unread, account: account.id)
         }
         return report
     }

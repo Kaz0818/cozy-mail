@@ -51,6 +51,9 @@ public protocol MessageStore: Sendable {
     func deleteAll(account: AccountID, mailbox: String) async throws
     /// アカウントを削除したとき。
     func deleteAccount(_ account: AccountID) async throws
+    /// サーバーから聞いた受信トレイの未読数。まだ聞けていなければ nil。
+    func inboxUnreadCount(account: AccountID) async throws -> Int?
+    func setInboxUnreadCount(_ count: Int, account: AccountID) async throws
     func allSummaries() async throws -> [MessageSummary]
 }
 
@@ -63,6 +66,7 @@ public actor InMemoryMessageStore: MessageStore {
 
     private var states: [FolderKey: MailboxSyncState] = [:]
     private var stored: [MessageID: StoredMessage] = [:]
+    private var inboxUnread: [AccountID: Int] = [:]
 
     public init() {}
 
@@ -96,6 +100,15 @@ public actor InMemoryMessageStore: MessageStore {
     public func deleteAccount(_ account: AccountID) {
         stored = stored.filter { _, message in message.summary.accountID != account }
         states = states.filter { key, _ in key.account != account }
+        inboxUnread[account] = nil
+    }
+
+    public func inboxUnreadCount(account: AccountID) -> Int? {
+        inboxUnread[account]
+    }
+
+    public func setInboxUnreadCount(_ count: Int, account: AccountID) {
+        inboxUnread[account] = count
     }
 
     public func allSummaries() -> [MessageSummary] {

@@ -15,6 +15,7 @@ import Testing
         if upper.hasPrefix("EXAMINE") {
             return ["* 3 EXISTS", "* OK [UIDVALIDITY 7] ok", "* OK [UIDNEXT 106] ok", "TAG OK [READ-ONLY] done"]
         }
+        if upper.hasPrefix("STATUS") { return ["* STATUS INBOX (UNSEEN 12)", "TAG OK STATUS completed"] }
         if upper.hasPrefix("UID SEARCH") { return ["* SEARCH 101 102 105", "TAG OK SEARCH completed"] }
         if upper.hasPrefix("UID FETCH"), upper.contains("BODY.PEEK[HEADER]") {
             let first = header("one")
@@ -124,6 +125,16 @@ import Testing
             _ = try await session.fetchFlags(in: "INBOX", uids: 1...5, includeGmailAttributes: false)
             _ = try await session.fetchHeaders(in: "INBOX", fromUID: 6, includeGmailAttributes: false)
             #expect(server.receivedCommands.filter { $0.hasPrefix("EXAMINE") }.count == 1)
+        }
+    }
+
+    /// 未読数はサーバーに直接聞く。保存しているのは最近 30 日分だけなので、数えると古い未読が漏れる。
+    @Test func asksTheServerForTheUnreadCount() async throws {
+        try await withSession { session, server in
+            let unread = try await session.unreadCount(of: "INBOX")
+            #expect(unread == 12)
+            // フォルダ名は引用符付きでも付かなくても正しい IMAP
+            #expect(server.receivedCommands.contains { ["STATUS INBOX (UNSEEN)", "STATUS \"INBOX\" (UNSEEN)"].contains($0) })
         }
     }
 
