@@ -1,12 +1,15 @@
 name: CI
 
+# macOS の環境は無料時間を Linux の 10 倍の速さで使うので、PR では Linux だけを回す。
+# macOS のビルドは main に取り込んだときと、手動 (Actions の画面の「Run workflow」) のときだけ。
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
@@ -26,20 +29,17 @@ jobs:
 
   macos:
     name: App (macOS)
+    if: github.event_name != 'pull_request'
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Show toolchain
-        run: |
-          xcodebuild -version
-          swift --version
+        run: xcodebuild -version
       - name: Install XcodeGen
         run: brew install xcodegen
-      - name: Test packages
-        run: |
-          for package in MailCore MailStore AccountKit; do
-            swift test --package-path "Packages/$package"
-          done
+      # パッケージのテストは Linux で回している。ここでは Mac でだけ使うキーチェーンの部分がビルドできるかだけ確かめる
+      - name: Build Mac-only package targets
+        run: swift build --package-path Packages/AccountKit
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Build and test app
