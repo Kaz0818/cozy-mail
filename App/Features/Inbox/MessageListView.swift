@@ -28,11 +28,10 @@ struct MessageListView: View {
                         MessageRow(
                             message: message,
                             accountName: model.accountName(for: message),
-                            isSelected: model.selectedMessageID == message.id
+                            isSelected: model.selectedMessageID == message.id,
+                            menu: menu(for: message)
                         ) {
                             Task { await model.selectMessage(message.id) }
-                        } menuItems: {
-                            MessageActionsMenu(model: model, message: message)
                         }
                     }
                 }
@@ -47,6 +46,20 @@ struct MessageListView: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 22)
+    }
+
+    /// 行の右クリックのメニュー。項目の中身と押せるかどうかは `InboxModel.menuEntries(for:)` が決める。
+    private func menu(for message: MessageSummary) -> [ContextMenuEntry] {
+        model.menuEntries(for: message).map { entry -> ContextMenuEntry in
+            switch entry {
+            case let .action(title, action, isEnabled):
+                return .item(title, isEnabled: isEnabled) {
+                    Task { await model.perform(action, on: message.id) }
+                }
+            case .separator:
+                return .separator
+            }
+        }
     }
 
     private var header: some View {
@@ -93,33 +106,6 @@ struct MessageListView: View {
             .help(Text("新規作成 (⌘N)"))
         }
         .padding(.horizontal, 6)
-    }
-}
-
-/// 行を右クリックしたときのメニュー。
-private struct MessageActionsMenu: View {
-    let model: InboxModel
-    let message: MessageSummary
-
-    var body: some View {
-        if message.isRead {
-            Button("未読にする") { Task { await model.perform(.markUnread, on: message.id) } }
-                .disabled(!model.canPerform(.markUnread, on: message))
-        } else {
-            Button("既読にする") { Task { await model.perform(.markRead, on: message.id) } }
-                .disabled(!model.canPerform(.markRead, on: message))
-        }
-        Button(message.isStarred ? "スターを外す" : "スターを付ける") {
-            Task { await model.perform(message.isStarred ? .unstar : .star, on: message.id) }
-        }
-        .disabled(!model.canPerform(message.isStarred ? .unstar : .star, on: message))
-        Divider()
-        Button("アーカイブ") { Task { await model.perform(.archive, on: message.id) } }
-            .disabled(!model.canPerform(.archive, on: message))
-        Button("削除") { Task { await model.perform(.moveToTrash, on: message.id) } }
-            .disabled(!model.canPerform(.moveToTrash, on: message))
-        Button("迷惑メールにする") { Task { await model.perform(.markAsJunk, on: message.id) } }
-            .disabled(!model.canPerform(.markAsJunk, on: message))
     }
 }
 
@@ -180,14 +166,13 @@ struct FilterTabs: View {
 }
 
 /// メール 1 通の行。未読は点と太字の両方で示す (色だけに頼らない)。
-/// クリックで選び、右クリックで `menuItems` のメニューを出す。
-/// (`Button` に右クリックのメニューを付けると、macOS では出ないことがあるので、ボタンにはしない)
-struct MessageRow<MenuItems: View>: View {
+/// クリックで選び、右クリックで `menu` のメニューを出す (`rightClickMenu` を参照)。
+struct MessageRow: View {
     let message: MessageSummary
     let accountName: String
     let isSelected: Bool
+    let menu: [ContextMenuEntry]
     let action: () -> Void
-    @ViewBuilder let menuItems: () -> MenuItems
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -229,12 +214,20 @@ struct MessageRow<MenuItems: View>: View {
         .selectionGlass(isSelected: isSelected)
         .contentShape(Rectangle())
         .onTapGesture(perform: action)
-        .contextMenu { menuItems() }
+        .rightClickMenu(menu)
         // 読み上げ (VoiceOver) では、これまでどおりボタンとして扱う
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityHint(Text(accountName))
         .accessibilityAction(.default, action)
+        // 読み上げでは、右クリックのメニューと同じ操作を「アクション」から選べる
+        .accessibilityActions {
+            ForEach(Array(menu.enumerated()), id: \.offset) { _, entry in
+                if case let .item(title, isEnabled, perform) = entry, isEnabled {
+                    Button(title) { perform() }
+                }
+            }
+        }
         .accessibilityIdentifier("messageRow.\(message.id.rawValue)")
     }
 

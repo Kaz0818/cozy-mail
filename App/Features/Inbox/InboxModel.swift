@@ -106,9 +106,11 @@ final class InboxModel {
             guard selectedMessageID == id else { return }
             selectedBody = body
             await markReadOnOpen(id)
-            // 初めて本文を取ったメールは、一覧の書き出しが埋まるので、一覧だけ読み直す (選択はそのまま)
-            if let refreshed = try? await repository.messages(in: selection, filter: filter), selectedMessageID == id {
-                messages = refreshed
+            // 初めて本文を取ったメールは、一覧の書き出し (2 行目) が埋まる。その書き出しだけを写す。
+            // 一覧そのものは入れ替えない (「未読」で絞っているとき、既読にしたばかりのメールが消えてしまうため)
+            if let refreshed = try? await repository.messages(in: selection, filter: filter), selectedMessageID == id,
+               let fresh = refreshed.first(where: { $0.id == id }) {
+                patch(id) { $0.preview = fresh.preview }
             }
         } catch {
             if selectedMessageID == id { bodyError = Self.describe(error, doing: "本文を取得") }
@@ -274,5 +276,30 @@ final class InboxModel {
         case .junk: "xmark.bin"
         case .trash: "trash"
         }
+    }
+}
+
+// MARK: - 右クリックのメニュー
+
+/// 行の右クリックのメニューの 1 項目 (画面の部品に依らない、中身だけ)。
+enum MessageMenuEntry: Equatable {
+    case action(title: String, action: MessageAction, isEnabled: Bool)
+    case separator
+}
+
+extension InboxModel {
+    /// 行の右クリックのメニュー。できない操作は灰色にする (見本のメールでは、すべて灰色)。
+    func menuEntries(for message: MessageSummary) -> [MessageMenuEntry] {
+        func entry(_ title: String, _ action: MessageAction) -> MessageMenuEntry {
+            .action(title: title, action: action, isEnabled: canPerform(action, on: message))
+        }
+        return [
+            message.isRead ? entry("未読にする", .markUnread) : entry("既読にする", .markRead),
+            message.isStarred ? entry("スターを外す", .unstar) : entry("スターを付ける", .star),
+            .separator,
+            entry("アーカイブ", .archive),
+            entry("削除", .moveToTrash),
+            entry("迷惑メールにする", .markAsJunk),
+        ]
     }
 }

@@ -130,6 +130,35 @@ private final class ActionSpyRepository: MailRepository, @unchecked Sendable {
         #expect(model.messages == before)
     }
 
+    /// 右クリックのメニュー: 未読のメールには「既読にする」、受信トレイのメールは全部押せる。
+    @Test func menuOffersTheActionsThatFitTheMessage() async throws {
+        let model = InboxModel(repository: ActionSpyRepository())
+        await model.load()
+        // m1 は開いたので既読、m2 はまだ未読
+        let unread = try #require(model.messages.first { $0.id == MessageID("m2") })
+        #expect(model.menuEntries(for: unread) == [
+            .action(title: "既読にする", action: .markRead, isEnabled: true),
+            .action(title: "スターを付ける", action: .star, isEnabled: true),
+            .separator,
+            .action(title: "アーカイブ", action: .archive, isEnabled: true),
+            .action(title: "削除", action: .moveToTrash, isEnabled: true),
+            .action(title: "迷惑メールにする", action: .markAsJunk, isEnabled: true),
+        ])
+        let opened = try #require(model.messages.first { $0.id == MessageID("m1") })
+        #expect(model.menuEntries(for: opened).first == .action(title: "未読にする", action: .markUnread, isEnabled: true))
+    }
+
+    @Test func menuOnSamplesIsShownButNothingCanBePressed() async throws {
+        let model = InboxModel(repository: PreviewMailRepository(), isShowingSamples: true)
+        await model.load()
+        let message = try #require(model.messages.first)
+        let entries = model.menuEntries(for: message)
+        #expect(entries.count == 6)
+        #expect(entries.allSatisfy { entry in
+            if case let .action(_, _, isEnabled) = entry { !isEnabled } else { true }
+        })
+    }
+
     @Test func archiveIsOnlyOfferedForInboxMessages() async {
         let model = InboxModel(repository: ActionSpyRepository())
         await model.load()
