@@ -1,6 +1,7 @@
 import Foundation
 import MailStore
 import Testing
+import UniformTypeIdentifiers
 @testable import CozyMail
 
 /// HTML メールを安全に表示するための文書づくり (SPEC 7: スクリプトを動かさない、外部画像は押すまで読み込まない)。
@@ -75,5 +76,24 @@ import Testing
         let attachment = try #require(model.selectedBody?.attachments.first)
         let data = try await model.attachmentData(attachment)
         #expect(String(decoding: data, as: UTF8.self).contains("企画書"))
+    }
+}
+
+@Suite struct AttachmentFileTests {
+    @Test func fileTypeComesFromTheExtensionThenTheMIMEType() {
+        let pdf = AttachmentFile(attachment: Attachment(filename: "企画書.pdf", mimeType: "application/octet-stream", byteCount: 3), data: Data("abc".utf8))
+        #expect(pdf.contentType == .pdf)
+        #expect(pdf.filename == "企画書.pdf")
+
+        let png = AttachmentFile(attachment: Attachment(filename: "logo", mimeType: "image/png", byteCount: 1), data: Data([1]))
+        #expect(png.contentType == .png)
+
+        let unknown = AttachmentFile(attachment: Attachment(filename: "blob", mimeType: "x-unknown/thing", byteCount: 1), data: Data([1]))
+        #expect(unknown.contentType == .data)
+    }
+
+    @Test func savedNameCannotEscapeTheChosenFolder() {
+        let file = AttachmentFile(attachment: Attachment(filename: "../secret.txt", mimeType: "text/plain", byteCount: 1), data: Data())
+        #expect(file.filename == "_secret.txt")
     }
 }

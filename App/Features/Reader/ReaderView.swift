@@ -2,6 +2,7 @@ import AppKit
 import MailStore
 import QuickLook
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 右の列: 件名、差出人、宛先、日時、本文、添付ファイル (見本の右の列)。
 /// 返信・削除などのボタンは T15 / T18 で動くようにする。
@@ -34,6 +35,9 @@ private struct MessageContent: View {
     @State private var allowsRemoteContent = false
     @State private var previewURL: URL?
     @State private var attachmentError: String?
+    /// 保存する添付ファイル。入れると保存先を選ぶ画面が開く。
+    @State private var exportFile: AttachmentFile?
+    @State private var isExporting = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -46,6 +50,18 @@ private struct MessageContent: View {
         }
         .padding(.bottom, 20)
         .quickLookPreview($previewURL)
+        // 保存先を選ぶ画面。サンドボックスのアプリ向けの SwiftUI の仕組みを使う
+        .fileExporter(
+            isPresented: $isExporting,
+            document: exportFile,
+            contentType: exportFile?.contentType ?? .data,
+            defaultFilename: exportFile?.filename
+        ) { result in
+            if case let .failure(error) = result {
+                attachmentError = "添付ファイルを保存できませんでした。(\(error.localizedDescription))"
+            }
+            exportFile = nil
+        }
     }
 
     @ViewBuilder
@@ -151,18 +167,46 @@ private struct MessageContent: View {
         }
     }
 
-    /// 保存先を選んでもらって書き出す。
+    /// 中身を取ってから、保存先を選ぶ画面を開く。
     private func save(_ attachment: Attachment) async {
         attachmentError = nil
         do {
             let data = try await model.attachmentData(attachment)
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = SafeHTML.safeFileName(attachment.filename)
-            guard panel.runModal() == .OK, let url = panel.url else { return }
-            try data.write(to: url)
+            exportFile = AttachmentFile(attachment: attachment, data: data)
+            isExporting = true
         } catch {
             attachmentError = "添付ファイルを保存できませんでした。(\(error.localizedDescription))"
         }
+    }
+}
+
+/// 保存する添付ファイル (SwiftUI の `fileExporter` に渡す形)。
+struct AttachmentFile: FileDocument {
+    /// どんな種類のファイルでも保存できるよう、すべての種類の元になる `.item` にする。
+    static var readableContentTypes: [UTType] { [.item] }
+
+    let data: Data
+    let filename: String
+    let contentType: UTType
+
+    init(attachment: Attachment, data: Data) {
+        self.data = data
+        filename = SafeHTML.safeFileName(attachment.filename)
+        // 知らない拡張子や MIME タイプからは「仮の種類」(dynamic) が作られることがあるので、それは使わない
+        let pathExtension = (filename as NSString).pathExtension
+        let byExtension = pathExtension.isEmpty ? nil : UTType(filenameExtension: pathExtension).flatMap { $0.isDynamic ? nil : $0 }
+        let byMIMEType = UTType(mimeType: attachment.mimeType).flatMap { $0.isDynamic ? nil : $0 }
+        contentType = byExtension ?? byMIMEType ?? .data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        data = configuration.file.regularFileContents ?? Data()
+        filename = configuration.file.filename ?? "attachment"
+        contentType = .data
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: data)
     }
 }
 
