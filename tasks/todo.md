@@ -138,7 +138,7 @@
 
 ### T7: IMAP で Yahoo! にログインして見出しを取る
 
-> 状態: 🐧 済 (偽サーバー相手のテスト 8 件) / 🍎 実際の Yahoo! での確認待ち。`swift-nio-imap` 0.4.0 は使いやすく、使い続けて問題なさそう
+> 状態: 🐧 済 (偽サーバー相手のテスト 8 件) / 🍎 **2026-11-13 オーナーの Mac で、実際の Gmail にアプリパスワードで接続し、件数と件名を確認済み**。Yahoo! は未確認。`swift-nio-imap` 0.4.0 は使いやすく、使い続けて問題なさそう
 
 **説明:** `swift-nio-imap` を使って、TLS で接続し、ログインし、フォルダ一覧 (`LIST`、`SPECIAL-USE`) を取り、受信トレイの最新 20 通の見出し (`UID FETCH`) を取る最小のクライアントを `MailCore` に作る。確認用のコマンドラインのツール `cozymail-probe` からこれを呼べるようにする。パスワードはコマンドの引数ではなく、環境変数か入力で受け取る。
 
@@ -175,7 +175,7 @@
 
 ### T9: Gmail の OAuth と XOAUTH2 でのログイン
 
-> 状態: 🐧 済 (AccountKit のテスト 19 件、XOAUTH2 のテスト 3 件) / 🍎 実際の Google での確認待ち。方式は「デスクトップ アプリ」用クライアント + ブラウザ + 127.0.0.1 で受け取る形に決めた (SPEC 2 章)。アプリのログイン画面は T12 で作る
+> 状態: 🐧 済 (AccountKit のテスト 19 件、XOAUTH2 のテスト 3 件)。**2026-11-13: Gmail はアプリパスワードでつなぐことにしたので、実際の Google での確認は P2 に回した** (「本番環境」に URL が必要なため)。方式は「デスクトップ アプリ」用クライアント + ブラウザ + 127.0.0.1 で受け取る形に決めた (SPEC 2 章)。アプリのログイン画面は T12 で作る
 
 **説明:** Google Cloud での OAuth の設定手順を `docs/google-oauth-setup.md` に書く (「本番」状態にする手順を含む)。`AccountKit` に、PKCE を使った認可 URL の組み立て、トークンの取得と更新、`SecretStore` プロトコルを作る。キーチェーンの実装 (`AccountKitKeychain`) と、`ASWebAuthenticationSession` でログイン画面を出す処理も作る。`MailCore` の IMAP は XOAUTH2 でもログインできるようにする。
 
@@ -194,9 +194,9 @@
 **大きさ:** M
 
 ### ✅ チェックポイント: 危険の確認
-- [ ] 🍎 Gmail (OAuth) と Yahoo! (アプリパスワード) の両方で、受信トレイの見出しが取れる
+- [ ] 🍎 Gmail と Yahoo! の両方で、アプリパスワードを使って受信トレイの見出しが取れる (`docs/app-passwords.md`) — Gmail は確認済み (2026-11-13)、Yahoo! は未確認
 - [ ] 🐧 すべてのパッケージのテストが通る
-- [ ] `swift-nio-imap` を使い続けるか、オーナーと確認する
+- [x] `swift-nio-imap` を使い続けるか、オーナーと確認する — 実際の Gmail で動いたので使い続ける (0.4.x に固定。0.5.0 は API が変わったので、上げるときは別の作業)
 
 ---
 
@@ -238,17 +238,17 @@
 
 ### T12: Gmail アカウントを追加すると、本物のメールが一覧に出る
 
-**説明:** アカウント追加の画面に「Google でログイン」を足す。T9 の OAuth でログインし、Gmail のアカウントとして同期を始める。3 つ追加しても、それぞれ別のアカウントとして扱う。
+**説明:** T11 のアカウント追加の画面で、Gmail をアプリパスワードで追加できるようにする (サーバー設定 `imap.gmail.com` / `smtp.gmail.com` を自動で入れる。ラベルなど Gmail 特有の扱いを有効にする)。3 つ追加しても、それぞれ別のアカウントとして扱う。「Google でログイン」(T9 の OAuth) は P2 に回した (SPEC 11 章)。
 
 **受け入れ条件:**
-- [ ] Google のログイン画面からアカウントを選ぶと、30 秒以内に受信トレイが出る (US-1)
+- [ ] メールアドレスとアプリパスワードを入れると、30 秒以内に受信トレイが出る (US-1)
 - [ ] Gmail 3 アカウントと Yahoo! 1 アカウントのメールが、統合受信トレイに混ざって新しい順に出る
 
 **確認:**
 - [ ] 🍎 Gmail 3 アカウントを追加して、それぞれの未読数が Web 版と一致する
 
-**依存:** T9, T11
-**触るファイル:** `App/Features/Accounts/AddAccountView.swift`、`App/Features/Accounts/GoogleSignInButton.swift`、`Packages/MailStore/Sources/MailStore/LiveMailRepository.swift`
+**依存:** T11
+**触るファイル:** `App/Features/Accounts/AddAccountView.swift`、`Packages/AccountKit/Sources/AccountKit/ProviderPresets.swift`、`Packages/MailStore/Sources/MailStore/LiveMailRepository.swift`
 **大きさ:** S
 
 ### T13: フォルダとラベルで絞り込める
@@ -393,6 +393,7 @@
 | T26 | 複数のメールを選んでまとめて操作 | US-17 | T15 |
 | T27 | サーバー側の検索 (Gmail は `X-GM-RAW`) | US-10 | T19 |
 | T28 | IMAP / SMTP のサーバー設定を手で入れる (独自ドメイン用) | US-2 | T11 |
+| T29 (P2) | Gmail の「Google でログイン」。ホームページとプライバシーポリシーの URL を用意して (例: GitHub Pages)、Google Cloud を「本番環境」にする | US-1 | T9, T12 |
 
 ### ✅ チェックポイント v1.0
 - [ ] 🍎 SPEC の成功の条件 (10 章) をすべて満たす

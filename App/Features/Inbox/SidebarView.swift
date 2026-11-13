@@ -13,9 +13,11 @@ struct SidebarView: View {
                 foldersSection
             }
             .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            .padding(.top, 20)
+            .padding(.bottom, 12)
         }
         .scrollContentBackground(.hidden)
+        .scrollIndicators(.never)
     }
 
     private var appHeader: some View {
