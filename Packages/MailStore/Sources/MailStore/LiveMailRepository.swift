@@ -1,28 +1,37 @@
 import Foundation
+import MailCore
 
 /// 本物のメール (同期して保存したもの) を画面に渡す窓口。仮データの `PreviewMailRepository` と差し替えて使う。
 public struct LiveMailRepository: MailRepository {
     public typealias MessageFetcher = @Sendable (StoredMessage) async throws -> Data
     public typealias SessionOpener = @Sendable (AccountID) async throws -> any MailServerSession
+    public typealias SenderOpener = @Sendable (AccountID) async throws -> any MailSendingSession
 
     private let store: any MessageStore
     private let accountList: @Sendable () async throws -> [Account]
     private let fetchMessage: MessageFetcher?
     private let openSession: SessionOpener?
+    private let openSender: SenderOpener?
+    private let now: @Sendable () -> Date
 
     /// - Parameters:
     ///   - accounts: いま登録されているアカウント。削除されたアカウントのメールは出さない。
     ///   - fetchMessage: まだ保存していない本文をサーバーから取る。nil なら `openSession` で取る。
-    ///   - openSession: 整理の操作 (と本文の取得) のためにサーバーにつなぐ。使い終わったら閉じる。
+    ///   - openSession: 整理の操作 (と本文の取得、送ったメールの保存) のためにサーバーにつなぐ。使い終わったら閉じる。
+    ///   - openSender: 送信のために、送信用のサーバー (SMTP) につなぐ。
     public init(
         store: any MessageStore,
         accounts: @escaping @Sendable () async throws -> [Account],
         fetchMessage: MessageFetcher? = nil,
-        openSession: SessionOpener? = nil
+        openSession: SessionOpener? = nil,
+        openSender: SenderOpener? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.store = store
         accountList = accounts
         self.openSession = openSession
+        self.openSender = openSender
+        self.now = now
         if let fetchMessage {
             self.fetchMessage = fetchMessage
         } else if let openSession {
@@ -162,6 +171,80 @@ public struct LiveMailRepository: MailRepository {
             try? await store.upsert([stored])
             if let previousUnread { try? await store.setInboxUnreadCount(previousUnread, account: account.id) }
             throw error
+        }
+    }
+
+    // MARK: - 返信と送信 (T18)
+
+    public func replySource(for id: MessageID) async throws -> ReplySource {
+        let raw = try await rawMessage(for: id)
+        guard let stored = try await store.message(id: id) else { throw MailRepositoryError.messageNotFound(id) }
+        let parsed = try MIMEParser.parse(raw)
+        let body = try MessageBodyBuilder.body(id: id, raw: raw)
+        let contacts = { (addresses: [EmailAddress]) in addresses.map { Contact(name: $0.name, address: $0.address) } }
+        return ReplySource(
+            accountID: stored.summary.accountID,
+            from: contacts(parsed.from),
+            replyTo: contacts(parsed.replyTo),
+            to: contacts(parsed.to),
+            cc: contacts(parsed.cc),
+            subject: parsed.subject,
+            date: parsed.date ?? stored.summary.date,
+            messageID: parsed.messageID,
+            references: parsed.references,
+            text: body.text,
+            attachments: parsed.attachments.filter { !$0.isInline }.map {
+                DraftAttachment(filename: $0.filename, mimeType: $0.mimeType, data: $0.data)
+            }
+        )
+    }
+
+    /// 送る。宛先が 1 つでも断られたら、誰にも送らない (`SMTPSession` の決まり)。
+    /// Gmail は送信したメールを自動で「送信済み」に入れるので、それ以外のときだけ `APPEND` する。
+    public func send(_ draft: Draft) async throws -> SendOutcome {
+        if let problem = Composer.problem(in: draft) { throw problem }
+        guard let openSender else { throw MailRepositoryError.actionUnavailable }
+        guard let account = try await accountList().first(where: { $0.id == draft.accountID }) else {
+            throw DraftProblem.noAccount
+        }
+
+        let from = EmailAddress(name: "", address: account.emailAddress)
+        let address = { (contacts: [Contact]) in contacts.map { EmailAddress(name: $0.name, address: $0.address) } }
+        let message = OutgoingMessage(
+            from: from,
+            to: address(draft.to),
+            cc: address(draft.cc),
+            bcc: address(draft.bcc),
+            subject: draft.subject,
+            textBody: draft.body,
+            attachments: draft.attachments.map { OutgoingAttachment(filename: $0.filename, mimeType: $0.mimeType, data: $0.data) },
+            inReplyTo: draft.inReplyTo,
+            references: draft.references,
+            date: now(),
+            messageID: MIMEBuilder.makeMessageID(for: from)
+        )
+        let data = try MIMEBuilder.build(message)
+
+        let sender = try await openSender(account.id)
+        do {
+            try await sender.send(data, from: account.emailAddress, to: message.envelopeRecipients)
+        } catch {
+            await sender.close()
+            throw error
+        }
+        await sender.close()
+
+        guard account.provider != .gmail else { return .sent }
+        // ここから先は送信済み。失敗しても「送れなかった」とは言わず、残せなかったことだけを知らせる
+        do {
+            guard let openSession else { throw MailRepositoryError.actionUnavailable }
+            let folder = try await folder(for: .sent, account: account.id)
+            try await Self.using(openSession, account: account.id) { session in
+                try await session.append(data, to: folder, flags: ["\\Seen"])
+            }
+            return .sent
+        } catch {
+            return .sentButNotSaved(String(describing: error))
         }
     }
 

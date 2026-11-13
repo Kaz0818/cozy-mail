@@ -9,6 +9,9 @@ final class ResponseCollector: ChannelInboundHandler, @unchecked Sendable {
     private var greeting: EventLoopPromise<Void>?
     private var greetingReceived = false
     private var current: (tag: String, promise: EventLoopPromise<[Response]>, responses: [Response])?
+    /// 接続が閉じた (または壊れた) 理由。閉じたあとに送った命令は、待たずにこの理由で失敗させる
+    /// (待ち続けると、答えの来ない約束が残る)。
+    private var closedReason: IMAPError?
 
     /// 接続直後のあいさつ (`* OK ...`) を待つ。
     func waitForGreeting(on eventLoop: EventLoop) async throws(IMAPError) {
@@ -31,7 +34,11 @@ final class ResponseCollector: ChannelInboundHandler, @unchecked Sendable {
     func expect(tag: String, on eventLoop: EventLoop) -> PendingResult {
         let promise = eventLoop.makePromise(of: [Response].self)
         eventLoop.execute {
-            self.current = (tag, promise, [])
+            if let reason = self.closedReason {
+                promise.fail(reason)
+            } else {
+                self.current = (tag, promise, [])
+            }
         }
         return PendingResult(future: promise.futureResult)
     }
@@ -85,12 +92,15 @@ final class ResponseCollector: ChannelInboundHandler, @unchecked Sendable {
     }
 
     func channelInactive(context: ChannelHandlerContext) {
+        if closedReason == nil { closedReason = .connectionClosed }
         fail(IMAPError.connectionClosed)
         context.fireChannelInactive()
     }
 
     func errorCaught(context: ChannelHandlerContext, error: Error) {
-        fail(IMAPError.unexpectedResponse(String(describing: error)))
+        let reason = IMAPError.unexpectedResponse(String(describing: error))
+        if closedReason == nil { closedReason = reason }
+        fail(reason)
         context.close(promise: nil)
     }
 

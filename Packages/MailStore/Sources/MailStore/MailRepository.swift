@@ -13,6 +13,28 @@ public protocol MailRepository: Sendable {
     func attachmentData(for id: MessageID, index: Int) async throws -> Data
     /// 既読・スター・アーカイブ・削除・迷惑メール。画面にはすぐ反映し、サーバーが断ったら元に戻して投げる。
     func perform(_ action: MessageAction, on id: MessageID) async throws
+    /// 返信・転送のための、元のメールの情報 (T18)。
+    func replySource(for id: MessageID) async throws -> ReplySource
+    /// メールを送る (T18)。送ったあと、Gmail 以外は「送信済み」フォルダにも入れる。
+    func send(_ draft: Draft) async throws -> SendOutcome
+}
+
+/// 送信の結果。
+public enum SendOutcome: Sendable, Equatable {
+    case sent
+    /// 送れたが、「送信済み」フォルダに残せなかった (理由)。
+    case sentButNotSaved(String)
+}
+
+extension MailRepository {
+    /// 送信に対応していない窓口 (テスト用のものなど) の既定: できない。
+    public func replySource(for id: MessageID) async throws -> ReplySource {
+        throw MailRepositoryError.actionUnavailable
+    }
+
+    public func send(_ draft: Draft) async throws -> SendOutcome {
+        throw MailRepositoryError.actionUnavailable
+    }
 }
 
 /// メールに対する整理の操作 (T15)。
