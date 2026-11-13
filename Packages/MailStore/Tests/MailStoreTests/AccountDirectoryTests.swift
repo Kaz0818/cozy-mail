@@ -1,0 +1,206 @@
+import AccountKit
+import Foundation
+import MailCore
+import Testing
+@testable import MailStore
+
+/// 接続のたびに、渡されたサーバー・ログイン情報を記録し、決めた結果を返す。
+private final class ConnectorSpy: @unchecked Sendable {
+    enum Outcome {
+        case succeed
+        case fail(IMAPError)
+    }
+
+    private let lock = NSLock()
+    private var outcome: Outcome
+    private(set) var attempts: [(server: IMAPServer, credentials: IMAPCredentials)] = []
+    let server = FakeMailServer()
+
+    init(_ outcome: Outcome = .succeed) {
+        self.outcome = outcome
+    }
+
+    var connector: AccountDirectory.Connector {
+        { [self] server, credentials in
+            let outcome = lock.withLock {
+                attempts.append((server, credentials))
+                return self.outcome
+            }
+            switch outcome {
+            case .succeed: return self.server
+            case let .fail(error): throw error
+            }
+        }
+    }
+}
+
+/// `acct-1`、`acct-2`… と順に ID を出す。
+private final class IDCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    func next() -> String {
+        lock.withLock {
+            value += 1
+            return "acct-\(value)"
+        }
+    }
+}
+
+@Suite struct ProviderChoiceTests {
+    @Test func automaticChoiceRecognisesCommonDomains() throws {
+        let gmail = try #require(ProviderChoice.automatic.resolve(email: "Me@Gmail.com"))
+        #expect(gmail.provider == .gmail)
+        #expect(gmail.imap == ServerSettings(host: "imap.gmail.com", port: 993))
+        #expect(gmail.smtp == ServerSettings(host: "smtp.gmail.com", port: 465))
+
+        let yahooJapan = try #require(ProviderChoice.automatic.resolve(email: "me@yahoo.co.jp"))
+        #expect(yahooJapan.provider == .yahoo)
+        #expect(yahooJapan.imap.host == "imap.mail.yahoo.co.jp")
+
+        let yahoo = try #require(ProviderChoice.automatic.resolve(email: "me@yahoo.com"))
+        #expect(yahoo.imap.host == "imap.mail.yahoo.com")
+
+        let icloud = try #require(ProviderChoice.automatic.resolve(email: "me@icloud.com"))
+        #expect(icloud.provider == .icloud)
+        #expect(icloud.imap == ServerSettings(host: "imap.mail.me.com", port: 993))
+    }
+
+    @Test func unknownDomainNeedsAnExplicitChoice() {
+        #expect(ProviderChoice.automatic.resolve(email: "taro@company.co.jp") == nil)
+        // 会社の Google Workspace は「Gmail」を選べば使える
+        #expect(ProviderChoice.gmail.resolve(email: "taro@company.co.jp")?.provider == .gmail)
+    }
+}
+
+@Suite struct AccountDirectoryTests {
+    private func makeDirectory(
+        _ spy: ConnectorSpy, storage: InMemoryAccountListStorage = InMemoryAccountListStorage(),
+        secrets: InMemorySecretStore = InMemorySecretStore()
+    ) -> AccountDirectory {
+        let counter = IDCounter()
+        return AccountDirectory(storage: storage, secrets: secrets, connector: spy.connector) { counter.next() }
+    }
+
+    @Test func addingAnAccountChecksTheLoginThenSavesIt() async throws {
+        let spy = ConnectorSpy()
+        let storage = InMemoryAccountListStorage()
+        let secrets = InMemorySecretStore()
+        let directory = makeDirectory(spy, storage: storage, secrets: secrets)
+
+        let account = try await directory.add(
+            email: "me@gmail.com", password: "abcd efgh ijkl mnop", displayName: "Gmail (仕事)", choice: .automatic
+        )
+
+        #expect(account == Account(id: AccountID("acct-1"), provider: .gmail, emailAddress: "me@gmail.com", displayName: "Gmail (仕事)"))
+        let attempt = try #require(spy.attempts.first)
+        #expect(attempt.server == IMAPServer(host: "imap.gmail.com", port: 993))
+        guard case let .password(username, password) = attempt.credentials else {
+            Issue.record("expected password credentials")
+            return
+        }
+        #expect(username == "me@gmail.com")
+        // Gmail のアプリパスワードは、表示上の空白を取り除いて使う
+        #expect(password == "abcdefghijklmnop")
+        #expect(await spy.server.calls.contains("LIST"))
+        #expect(await spy.server.calls.last == "CLOSE")
+        #expect(try secrets.data(for: "password.acct-1") == Data("abcdefghijklmnop".utf8))
+
+        // 保存先から読み直しても同じアカウントが出る (パスワードは一覧に入らない)
+        let reopened = makeDirectory(ConnectorSpy(), storage: storage, secrets: secrets)
+        #expect(try await reopened.accounts() == [account])
+        let saved = String(decoding: try #require(try storage.load()), as: UTF8.self)
+        #expect(!saved.contains("abcdefghijklmnop"))
+        #expect(try await reopened.settings(for: account.id)?.smtp == ServerSettings(host: "smtp.gmail.com", port: 465))
+    }
+
+    @Test func emptyDisplayNameFallsBackToTheAddress() async throws {
+        let account = try await makeDirectory(ConnectorSpy()).add(
+            email: "me@yahoo.co.jp", password: "pw", displayName: "  ", choice: .automatic
+        )
+        #expect(account.displayName == "me@yahoo.co.jp")
+        #expect(account.provider == .yahoo)
+    }
+
+    @Test func wrongPasswordSavesNothing() async throws {
+        let spy = ConnectorSpy(.fail(.authenticationFailed("Invalid credentials")))
+        let storage = InMemoryAccountListStorage()
+        let secrets = InMemorySecretStore()
+        let directory = makeDirectory(spy, storage: storage, secrets: secrets)
+
+        await #expect(throws: AccountError.wrongPassword("Invalid credentials")) {
+            _ = try await directory.add(email: "me@gmail.com", password: "nope", displayName: "", choice: .automatic)
+        }
+        #expect(try await directory.accounts().isEmpty)
+        #expect(try secrets.data(for: "password.acct-1") == nil)
+        #expect(try storage.load() == nil)
+    }
+
+    @Test func connectionFailureIsReportedSeparately() async throws {
+        let directory = makeDirectory(ConnectorSpy(.fail(.connectionFailed("timeout"))))
+        await #expect(throws: AccountError.cannotConnect("timeout")) {
+            _ = try await directory.add(email: "me@gmail.com", password: "pw", displayName: "", choice: .automatic)
+        }
+    }
+
+    @Test func inputIsValidatedBeforeConnecting() async throws {
+        let spy = ConnectorSpy()
+        let directory = makeDirectory(spy)
+        await #expect(throws: AccountError.invalidAddress) {
+            _ = try await directory.add(email: "not-an-address", password: "pw", displayName: "", choice: .automatic)
+        }
+        await #expect(throws: AccountError.emptyPassword) {
+            _ = try await directory.add(email: "me@gmail.com", password: "   ", displayName: "", choice: .automatic)
+        }
+        await #expect(throws: AccountError.unknownProvider) {
+            _ = try await directory.add(email: "taro@company.co.jp", password: "pw", displayName: "", choice: .automatic)
+        }
+        #expect(spy.attempts.isEmpty)
+    }
+
+    @Test func sameAddressCannotBeAddedTwice() async throws {
+        let directory = makeDirectory(ConnectorSpy())
+        _ = try await directory.add(email: "me@gmail.com", password: "pw", displayName: "", choice: .automatic)
+        await #expect(throws: AccountError.alreadyAdded) {
+            _ = try await directory.add(email: "ME@gmail.com", password: "pw", displayName: "", choice: .automatic)
+        }
+    }
+
+    @Test func threeGmailAccountsAreKeptInOrder() async throws {
+        let directory = makeDirectory(ConnectorSpy())
+        for name in ["work", "private", "side"] {
+            _ = try await directory.add(email: "\(name)@gmail.com", password: "pw", displayName: name, choice: .automatic)
+        }
+        #expect(try await directory.accounts().map(\.displayName) == ["work", "private", "side"])
+    }
+
+    @Test func removingAnAccountDeletesItsPasswordAndMail() async throws {
+        let secrets = InMemorySecretStore()
+        let directory = makeDirectory(ConnectorSpy(), secrets: secrets)
+        let store = InMemoryMessageStore()
+        let account = try await directory.add(email: "me@gmail.com", password: "pw", displayName: "", choice: .automatic)
+        try await store.setInboxUnreadCount(3, account: account.id)
+
+        try await directory.remove(account.id, messages: store)
+
+        #expect(try await directory.accounts().isEmpty)
+        #expect(try secrets.data(for: "password.\(account.id.rawValue)") == nil)
+        #expect(try await store.inboxUnreadCount(account: account.id) == nil)
+    }
+
+    @Test func openingASessionUsesTheSavedPassword() async throws {
+        let spy = ConnectorSpy()
+        let directory = makeDirectory(spy)
+        let account = try await directory.add(email: "me@yahoo.co.jp", password: "secret", displayName: "", choice: .automatic)
+
+        _ = try await directory.openSession(for: account.id)
+
+        let attempt = try #require(spy.attempts.last)
+        #expect(attempt.server.host == "imap.mail.yahoo.co.jp")
+        guard case let .password(_, password) = attempt.credentials else {
+            Issue.record("expected password credentials")
+            return
+        }
+        #expect(password == "secret")
+    }
+}

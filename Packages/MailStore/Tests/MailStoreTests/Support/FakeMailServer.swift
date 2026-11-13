@@ -99,6 +99,10 @@ actor FakeMailServer: MailServerSession {
         return result.map { header($0, gmail: includeGmailAttributes) }
     }
 
+    func close() async {
+        calls.append("CLOSE")
+    }
+
     /// 本物の STATUS と同じく、期間に関係なくフォルダ全体の未読を数える。
     func unreadCount(of mailbox: String) async throws -> Int {
         calls.append("STATUS \(mailbox)")

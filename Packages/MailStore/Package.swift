@@ -9,9 +9,23 @@ let package = Package(
     ],
     dependencies: [
         .package(path: "../MailCore"),
+        .package(path: "../AccountKit"),
     ],
     targets: [
-        .target(name: "MailStore", dependencies: [.product(name: "MailCore", package: "MailCore")]),
-        .testTarget(name: "MailStoreTests", dependencies: ["MailStore", .product(name: "MailCore", package: "MailCore")]),
+        .target(
+            name: "MailStore",
+            dependencies: [
+                .product(name: "MailCore", package: "MailCore"),
+                .product(name: "AccountKit", package: "AccountKit"),
+            ]
+        ),
+        .testTarget(
+            name: "MailStoreTests",
+            dependencies: [
+                "MailStore",
+                .product(name: "MailCore", package: "MailCore"),
+                .product(name: "AccountKit", package: "AccountKit"),
+            ]
+        ),
     ]
 )
