@@ -31,8 +31,9 @@ struct MessageListView: View {
                             isSelected: model.selectedMessageID == message.id
                         ) {
                             Task { await model.selectMessage(message.id) }
+                        } menuItems: {
+                            MessageActionsMenu(model: model, message: message)
                         }
-                        .contextMenu { MessageActionsMenu(model: model, message: message) }
                     }
                 }
             }
@@ -179,56 +180,61 @@ struct FilterTabs: View {
 }
 
 /// メール 1 通の行。未読は点と太字の両方で示す (色だけに頼らない)。
-struct MessageRow: View {
+/// クリックで選び、右クリックで `menuItems` のメニューを出す。
+/// (`Button` に右クリックのメニューを付けると、macOS では出ないことがあるので、ボタンにはしない)
+struct MessageRow<MenuItems: View>: View {
     let message: MessageSummary
     let accountName: String
     let isSelected: Bool
     let action: () -> Void
+    @ViewBuilder let menuItems: () -> MenuItems
 
     var body: some View {
-        Button(action: action) {
-            HStack(alignment: .top, spacing: 10) {
-                Circle()
-                    .fill(message.isRead ? Color.clear : Palette.accent)
-                    .frame(width: 8, height: 8)
-                    .padding(.top, 16)
-                AvatarView(name: message.sender.name)
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(message.sender.name)
-                            .font(.body.weight(message.isRead ? .medium : .bold))
-                            .foregroundStyle(primaryText)
-                            .lineLimit(1)
-                        Spacer(minLength: 6)
-                        Text(MailDateText.list(message.date))
-                            .font(.callout.monospacedDigit())
-                            .foregroundStyle(secondaryText)
-                    }
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(message.subject)
-                            .font(.callout.weight(message.isRead ? .regular : .semibold))
-                            .foregroundStyle(primaryText)
-                            .lineLimit(1)
-                        Spacer(minLength: 6)
-                        Image(systemName: message.isStarred ? "star.fill" : "star")
-                            .foregroundStyle(message.isStarred ? Color.yellow : secondaryText)
-                            .accessibilityLabel(Text(message.isStarred ? "スター付き" : "スターなし"))
-                    }
-                    Text(message.preview)
-                        .font(.callout)
-                        .foregroundStyle(secondaryText)
+        HStack(alignment: .top, spacing: 10) {
+            Circle()
+                .fill(message.isRead ? Color.clear : Palette.accent)
+                .frame(width: 8, height: 8)
+                .padding(.top, 16)
+            AvatarView(name: message.sender.name)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(message.sender.name)
+                        .font(.body.weight(message.isRead ? .medium : .bold))
+                        .foregroundStyle(primaryText)
                         .lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text(MailDateText.list(message.date))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(secondaryText)
                 }
+                HStack(alignment: .firstTextBaseline) {
+                    Text(message.subject)
+                        .font(.callout.weight(message.isRead ? .regular : .semibold))
+                        .foregroundStyle(primaryText)
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    Image(systemName: message.isStarred ? "star.fill" : "star")
+                        .foregroundStyle(message.isStarred ? Color.yellow : secondaryText)
+                        .accessibilityLabel(Text(message.isStarred ? "スター付き" : "スターなし"))
+                }
+                Text(message.preview)
+                    .font(.callout)
+                    .foregroundStyle(secondaryText)
+                    .lineLimit(1)
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 10)
-            .contentShape(Rectangle())
-            .selectionGlass(isSelected: isSelected)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+        .selectionGlass(isSelected: isSelected)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: action)
+        .contextMenu { menuItems() }
+        // 読み上げ (VoiceOver) では、これまでどおりボタンとして扱う
         .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
         .accessibilityHint(Text(accountName))
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .accessibilityAction(.default, action)
     }
 
     private var primaryText: Color {
