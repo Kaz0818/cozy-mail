@@ -350,13 +350,16 @@
 **説明:** `MailCore` に SMTP クライアント (TLS、ログイン、XOAUTH2) と、送信用のメールの組み立て (日本語の件名、本文、添付、返信のための `In-Reply-To` / `References`) を作る。
 
 **受け入れ条件:**
-- [ ] 偽の SMTP サーバー相手のテストで送信が通る
-- [ ] 組み立てたメールを T8 の解析器で読むと、元の内容に戻る
-- [ ] 暗号化なしの接続はできない
+- [x] 偽の SMTP サーバー相手のテストで送信が通る
+- [x] 組み立てたメールを T8 の解析器で読むと、元の内容に戻る
+- [x] 暗号化なしの接続はできない
 
 **確認:**
-- [ ] 🐧 `swift test --package-path Packages/MailCore`
+- [x] 🐧 `swift test --package-path Packages/MailCore` (80 件すべて通過、2026-11-13)
 - [ ] 🍎 `cozymail-probe send` で、オーナー自身のアドレスにテストメールが届く
+
+> 状態 (2026-11-13): 🐧 済み。`SMTPSession` (465 は最初から TLS、587 は STARTTLS 必須。AUTH PLAIN / LOGIN / XOAUTH2。宛先が 1 つでも断られたら本文は送らない。「.」で始まる行の処理。返事と書き込みの時間切れ) と `MIMEBuilder` (日本語の件名・名前は RFC 2047、ファイル名は RFC 2231 で分割、本文は UTF-8 の Base64、1 行 78 文字まで、改行によるヘッダーの差し込みを防ぐ、Bcc はヘッダーに書かない)。
+> - 作業中に見つけて直したこと: STARTTLS の暗号化の始まりで書き込みが終わらず止まることがあった → 書き込みにも時間切れを付けた。
 
 **依存:** T8, T9
 **触るファイル:** `Sources/MailCore/SMTP/SMTPSession.swift`、`Sources/MailCore/MIME/MIMEBuilder.swift`、`Tests/MailCoreTests/SMTPSessionTests.swift`、`Tests/MailCoreTests/MIMEBuilderTests.swift`
