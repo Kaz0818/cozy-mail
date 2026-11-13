@@ -59,6 +59,9 @@ public protocol MessageStore: Sendable {
     /// 取得したメール全体の生データ (本文と添付)。まだ取っていなければ nil。
     func rawMessage(for id: MessageID) async throws -> Data?
     func setRawMessage(_ data: Data, for id: MessageID) async throws
+    /// 役割 (ゴミ箱など) ごとのサーバー上のフォルダ名。同期のたびに覚え直す。
+    func mailboxName(for role: MailboxRole, account: AccountID) async throws -> String?
+    func setMailboxNames(_ names: [MailboxRole: String], account: AccountID) async throws
 }
 
 /// テストと SwiftUI プレビュー用。アプリを終了すると消える。
@@ -72,6 +75,7 @@ public actor InMemoryMessageStore: MessageStore {
     private var stored: [MessageID: StoredMessage] = [:]
     private var inboxUnread: [AccountID: Int] = [:]
     private var raw: [MessageID: Data] = [:]
+    private var mailboxNames: [AccountID: [MailboxRole: String]] = [:]
 
     public init() {}
 
@@ -104,6 +108,15 @@ public actor InMemoryMessageStore: MessageStore {
         removeMessages { $0.summary.accountID == account }
         states = states.filter { key, _ in key.account != account }
         inboxUnread[account] = nil
+        mailboxNames[account] = nil
+    }
+
+    public func mailboxName(for role: MailboxRole, account: AccountID) -> String? {
+        mailboxNames[account]?[role]
+    }
+
+    public func setMailboxNames(_ names: [MailboxRole: String], account: AccountID) {
+        mailboxNames[account] = names
     }
 
     public func inboxUnreadCount(account: AccountID) -> Int? {

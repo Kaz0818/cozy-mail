@@ -13,6 +13,12 @@ public protocol MailServerSession: Sendable {
     func unreadCount(of mailbox: String) async throws -> Int
     /// メール 1 通の全体。既読にはしない。
     func fetchMessage(in mailbox: String, uid: UInt32) async throws -> Data
+    /// フラグ (`\Seen`、`\Flagged`) を付ける・外す。
+    func setFlags(_ flags: [String], add: Bool, in mailbox: String, uids: [UInt32]) async throws
+    /// Gmail のラベルを付ける・外す。
+    func setGmailLabels(_ labels: [String], add: Bool, in mailbox: String, uids: [UInt32]) async throws
+    /// 別のフォルダへ移す。
+    func move(uids: [UInt32], from mailbox: String, to target: String) async throws
     /// ログアウトして接続を閉じる。
     func close() async
 }
@@ -62,8 +68,15 @@ public struct SyncEngine: Sendable {
 
     public func sync(account: Account, session: some MailServerSession) async throws -> Report {
         let mailboxes = try await session.listMailboxes()
+        let targets = Self.targets(for: account.provider, mailboxes: mailboxes)
+        // 整理の操作 (ゴミ箱・迷惑メール・アーカイブへ移す) で使うので、役割ごとのフォルダ名を覚えておく
+        var names: [MailboxRole: String] = [:]
+        for target in targets {
+            if let role = target.role, names[role] == nil { names[role] = target.name }
+        }
+        try await store.setMailboxNames(names, account: account.id)
         var report = Report()
-        for target in Self.targets(for: account.provider, mailboxes: mailboxes) {
+        for target in targets {
             let result = try await sync(target, account: account, session: session)
             report.added += result.added
             report.updated += result.updated

@@ -33,6 +33,11 @@ public struct PreviewMailRepository: MailRepository {
         return MessageBody(messageID: id, to: [Contact(name: "自分", address: "me@example.com")], text: summary.preview)
     }
 
+    /// 見本のメールは変えられない。
+    public func perform(_ action: MessageAction, on id: MessageID) async throws {
+        throw MailRepositoryError.actionUnavailable
+    }
+
     /// 見本なので、添付ファイルの中身は説明の文だけ。
     public func attachmentData(for id: MessageID, index: Int) async throws -> Data {
         guard let attachment = bodies[id]?.attachments.first(where: { $0.index == index }) else {

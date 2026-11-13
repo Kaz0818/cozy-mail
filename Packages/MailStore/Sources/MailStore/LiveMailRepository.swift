@@ -3,22 +3,37 @@ import Foundation
 /// 本物のメール (同期して保存したもの) を画面に渡す窓口。仮データの `PreviewMailRepository` と差し替えて使う。
 public struct LiveMailRepository: MailRepository {
     public typealias MessageFetcher = @Sendable (StoredMessage) async throws -> Data
+    public typealias SessionOpener = @Sendable (AccountID) async throws -> any MailServerSession
 
     private let store: any MessageStore
     private let accountList: @Sendable () async throws -> [Account]
     private let fetchMessage: MessageFetcher?
+    private let openSession: SessionOpener?
 
     /// - Parameters:
     ///   - accounts: いま登録されているアカウント。削除されたアカウントのメールは出さない。
-    ///   - fetchMessage: まだ保存していない本文をサーバーから取る。nil なら取らない。
+    ///   - fetchMessage: まだ保存していない本文をサーバーから取る。nil なら `openSession` で取る。
+    ///   - openSession: 整理の操作 (と本文の取得) のためにサーバーにつなぐ。使い終わったら閉じる。
     public init(
         store: any MessageStore,
         accounts: @escaping @Sendable () async throws -> [Account],
-        fetchMessage: MessageFetcher? = nil
+        fetchMessage: MessageFetcher? = nil,
+        openSession: SessionOpener? = nil
     ) {
         self.store = store
         accountList = accounts
-        self.fetchMessage = fetchMessage
+        self.openSession = openSession
+        if let fetchMessage {
+            self.fetchMessage = fetchMessage
+        } else if let openSession {
+            self.fetchMessage = { stored in
+                try await Self.using(openSession, account: stored.summary.accountID) { session in
+                    try await session.fetchMessage(in: stored.mailbox, uid: stored.uid)
+                }
+            }
+        } else {
+            self.fetchMessage = nil
+        }
     }
 
     public func accounts() async throws -> [Account] {
@@ -80,6 +95,101 @@ public struct LiveMailRepository: MailRepository {
             try await store.upsert([updated])
         }
         return raw
+    }
+
+    // MARK: - 整理の操作
+
+    public func perform(_ action: MessageAction, on id: MessageID) async throws {
+        guard let openSession else { throw MailRepositoryError.actionUnavailable }
+        let accounts = try await accountList()
+        guard let stored = try await store.message(id: id),
+              let account = accounts.first(where: { $0.id == stored.summary.accountID }) else {
+            throw MailRepositoryError.messageNotFound(id)
+        }
+        let gmail = account.provider == .gmail
+
+        // 1. 何をするかを決める (できない操作や、移す先のフォルダがないときは、何も変えずに断る)
+        var updated = stored
+        var destination: String?
+        switch action {
+        case .markRead: updated.summary.isRead = true
+        case .markUnread: updated.summary.isRead = false
+        case .star, .unstar:
+            updated.summary.isStarred = action == .star
+            updated.summary.isFlagged = action == .star
+        case .archive:
+            guard stored.summary.mailbox == .inbox else { throw MailRepositoryError.actionNotApplicable }
+            updated.summary.mailbox = .archive
+            if gmail {
+                updated.labels = stored.labels.filter { $0.caseInsensitiveCompare("\\Inbox") != .orderedSame }
+            } else {
+                destination = try await folder(for: .archive, account: account.id)
+            }
+        case .moveToTrash, .markAsJunk:
+            let role: MailboxRole = action == .moveToTrash ? .trash : .junk
+            guard stored.summary.mailbox != role else { throw MailRepositoryError.actionNotApplicable }
+            updated.summary.mailbox = role
+            destination = try await folder(for: role, account: account.id)
+        }
+        guard updated != stored else { return }
+
+        // 2. 画面にすぐ出るよう、先に保存先を変える (受信トレイの未読数も合わせる)
+        let previousUnread = try await store.inboxUnreadCount(account: account.id)
+        try await store.upsert([updated])
+        let delta = Self.unreadInboxCount(updated) - Self.unreadInboxCount(stored)
+        if delta != 0, let previousUnread {
+            try await store.setInboxUnreadCount(max(0, previousUnread + delta), account: account.id)
+        }
+
+        // 3. サーバーに送る。断られたら、保存先を元に戻して投げる
+        do {
+            try await Self.using(openSession, account: account.id) { session in
+                let mailbox = stored.mailbox
+                let uids = [stored.uid]
+                switch action {
+                case .markRead, .markUnread:
+                    try await session.setFlags(["\\Seen"], add: action == .markRead, in: mailbox, uids: uids)
+                case .star, .unstar:
+                    try await session.setFlags(["\\Flagged"], add: action == .star, in: mailbox, uids: uids)
+                case .archive where gmail:
+                    try await session.setGmailLabels(["\\Inbox"], add: false, in: mailbox, uids: uids)
+                case .archive, .moveToTrash, .markAsJunk:
+                    guard let destination else { throw MailRepositoryError.actionNotApplicable }
+                    try await session.move(uids: uids, from: mailbox, to: destination)
+                }
+            }
+        } catch {
+            try? await store.upsert([stored])
+            if let previousUnread { try? await store.setInboxUnreadCount(previousUnread, account: account.id) }
+            throw error
+        }
+    }
+
+    private func folder(for role: MailboxRole, account: AccountID) async throws -> String {
+        guard let name = try await store.mailboxName(for: role, account: account) else {
+            throw MailRepositoryError.noFolder(role)
+        }
+        return name
+    }
+
+    /// 受信トレイの未読なら 1。
+    private static func unreadInboxCount(_ message: StoredMessage) -> Int {
+        message.summary.mailbox == .inbox && !message.summary.isRead ? 1 : 0
+    }
+
+    /// サーバーにつないで作業し、成功しても失敗しても閉じる。
+    private static func using<T: Sendable>(
+        _ openSession: SessionOpener, account: AccountID, _ work: (any MailServerSession) async throws -> T
+    ) async throws -> T {
+        let session = try await openSession(account)
+        do {
+            let result = try await work(session)
+            await session.close()
+            return result
+        } catch {
+            await session.close()
+            throw error
+        }
     }
 
     /// 登録中のアカウントのメールだけ。

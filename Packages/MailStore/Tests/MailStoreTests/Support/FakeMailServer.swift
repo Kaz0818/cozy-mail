@@ -107,6 +107,62 @@ actor FakeMailServer: MailServerSession {
         return Data("Subject: \(message.subject)\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nbody \(uid)\r\n".utf8)
     }
 
+    /// true にすると、次の書き込み (フラグ・ラベル・移動) が失敗する。
+    private(set) var failNextWrite = false
+
+    func setFailNextWrite(_ value: Bool) {
+        failNextWrite = value
+    }
+
+    private func checkWrite() throws {
+        if failNextWrite {
+            failNextWrite = false
+            throw FakeServerError.writeRejected
+        }
+    }
+
+    func setFlags(_ flags: [String], add: Bool, in mailbox: String, uids: [UInt32]) async throws {
+        calls.append("STORE \(mailbox) \(add ? "+" : "-")\(flags.joined(separator: " ")) \(uids.sorted())")
+        try checkWrite()
+        guard var entry = folders[mailbox] else { throw FakeServerError.noSuchMailbox(mailbox) }
+        for index in entry.messages.indices where uids.contains(entry.messages[index].uid) {
+            var current = entry.messages[index].flags.filter { !flags.contains($0) }
+            if add { current += flags }
+            entry.messages[index].flags = current
+        }
+        folders[mailbox] = entry
+    }
+
+    func setGmailLabels(_ labels: [String], add: Bool, in mailbox: String, uids: [UInt32]) async throws {
+        calls.append("LABELS \(mailbox) \(add ? "+" : "-")\(labels.joined(separator: " ")) \(uids.sorted())")
+        try checkWrite()
+        guard var entry = folders[mailbox] else { throw FakeServerError.noSuchMailbox(mailbox) }
+        for index in entry.messages.indices where uids.contains(entry.messages[index].uid) {
+            var current = entry.messages[index].labels.filter { !labels.contains($0) }
+            if add { current += labels }
+            entry.messages[index].labels = current
+        }
+        folders[mailbox] = entry
+    }
+
+    /// 本物と同じく、移した先では新しい UID になる。
+    func move(uids: [UInt32], from mailbox: String, to target: String) async throws {
+        calls.append("MOVE \(mailbox) -> \(target) \(uids.sorted())")
+        try checkWrite()
+        guard var source = folders[mailbox], var destination = folders[target] else {
+            throw FakeServerError.noSuchMailbox("\(mailbox) or \(target)")
+        }
+        let moving = source.messages.filter { uids.contains($0.uid) }
+        source.messages.removeAll { uids.contains($0.uid) }
+        for var message in moving {
+            message.uid = destination.uidNext
+            destination.uidNext += 1
+            destination.messages.append(message)
+        }
+        folders[mailbox] = source
+        folders[target] = destination
+    }
+
     func close() async {
         calls.append("CLOSE")
     }
@@ -155,6 +211,7 @@ actor FakeMailServer: MailServerSession {
     }
 }
 
-enum FakeServerError: Error {
+enum FakeServerError: Error, Equatable {
     case noSuchMailbox(String)
+    case writeRejected
 }
