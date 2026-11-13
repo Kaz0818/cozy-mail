@@ -26,6 +26,8 @@ final class InboxModel {
     private(set) var filter: MessageFilter = .all
     private(set) var selectedMessageID: MessageID?
     private(set) var selectedBody: MessageBody?
+    /// 本文を取れなかったときの説明。取れたら nil。
+    private(set) var bodyError: String?
     private(set) var errorMessage: String?
     /// アカウントがまだ 1 つもなく、見本のメールを出しているとき。
     private(set) var isShowingSamples = false
@@ -90,12 +92,44 @@ final class InboxModel {
     func selectMessage(_ id: MessageID?) async {
         selectedMessageID = id
         selectedBody = nil
+        bodyError = nil
         guard let id else { return }
         do {
             let body = try await repository.body(for: id)
-            if selectedMessageID == id { selectedBody = body }
+            guard selectedMessageID == id else { return }
+            selectedBody = body
+            // 初めて本文を取ったメールは、一覧の書き出しが埋まるので、一覧だけ読み直す (選択はそのまま)
+            if let refreshed = try? await repository.messages(in: selection, filter: filter), selectedMessageID == id {
+                messages = refreshed
+            }
         } catch {
-            errorMessage = String(describing: error)
+            if selectedMessageID == id { bodyError = Self.describe(error) }
+        }
+    }
+
+    /// 本文の取得をやり直す。
+    func retryBody() async {
+        await selectMessage(selectedMessageID)
+    }
+
+    /// 選んでいるメールの添付ファイルの中身。
+    func attachmentData(_ attachment: Attachment) async throws -> Data {
+        guard let id = selectedMessageID else { throw MailRepositoryError.attachmentNotFound }
+        return try await repository.attachmentData(for: id, index: attachment.index)
+    }
+
+    private static func describe(_ error: any Error) -> String {
+        switch error {
+        case let error as MailRepositoryError:
+            switch error {
+            case .messageNotFound: "メールが見つかりません。新着メールを受信し直してください。"
+            case .bodyUnavailable: "本文を取得できません。"
+            case .attachmentNotFound: "添付ファイルが見つかりません。"
+            }
+        case let error as CustomStringConvertible:
+            "本文を取得できませんでした。\(error.description)"
+        default:
+            "本文を取得できませんでした。"
         }
     }
 
