@@ -63,6 +63,14 @@ public struct IMAPMailbox: Sendable, Hashable {
     public var specialUse: IMAPSpecialUse?
     /// `\Noselect` が付いたフォルダ (階層の入れ物だけで、メールは入らない) は false。
     public var isSelectable: Bool
+
+    public init(name: String, rawName: String, separator: Character?, specialUse: IMAPSpecialUse?, isSelectable: Bool) {
+        self.name = name
+        self.rawName = rawName
+        self.separator = separator
+        self.specialUse = specialUse
+        self.isSelectable = isSelectable
+    }
 }
 
 public struct IMAPMailboxStatus: Sendable, Hashable {
