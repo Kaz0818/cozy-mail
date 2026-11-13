@@ -9,6 +9,8 @@ public actor IMAPSession {
     private let channel: Channel
     private let collector: ResponseCollector
     private var nextTag = 1
+    /// いま開いているフォルダ。同じフォルダへの命令が続くときに、開き直さないため。
+    private var examinedMailbox: String?
 
     private init(channel: Channel, collector: ResponseCollector) {
         self.channel = channel
@@ -91,7 +93,9 @@ public actor IMAPSession {
 
     /// 読み取り専用でフォルダを開き、件数などを返す。
     public func examine(_ mailbox: String) async throws(IMAPError) -> IMAPMailboxStatus {
+        examinedMailbox = nil
         let responses = try await run(.examine(MailboxName(ByteBuffer(string: mailbox))))
+        examinedMailbox = mailbox
         var status = IMAPMailboxStatus(messageCount: 0, uidValidity: 0, uidNext: nil)
         for response in responses {
             switch response {
@@ -126,6 +130,110 @@ public actor IMAPSession {
             []
         ))
         return FetchAssembler.headers(from: responses).sorted { $0.uid > $1.uid }
+    }
+
+    /// フォルダの未読数をサーバーに聞く (`STATUS (UNSEEN)`)。フォルダを開かずに聞ける。
+    public func unreadCount(of mailbox: String) async throws(IMAPError) -> Int {
+        let responses = try await run(.status(MailboxName(ByteBuffer(string: mailbox)), [.unseenCount]))
+        for response in responses {
+            if case let .untagged(.mailboxData(.status(_, status))) = response, let unseen = status.unseenCount {
+                return unseen
+            }
+        }
+        throw .unexpectedResponse("STATUS の応答に UNSEEN がありません")
+    }
+
+    /// 指定した日付以降に届いたメールの UID を、小さい順に返す (`UID SEARCH SINCE`)。
+    /// 日付は `calendar` のタイムゾーンでの日にちとして送る (IMAP の SINCE は時刻を持たない)。
+    public func searchUIDs(
+        in mailbox: String, since date: Date, calendar: Calendar = .current
+    ) async throws(IMAPError) -> [UInt32] {
+        try await ensureExamined(mailbox)
+        let components = calendar.dateComponents([.year, .month, .day], from: date)
+        guard let year = components.year, let month = components.month, let day = components.day,
+              let calendarDay = IMAPCalendarDay(year: year, month: month, day: day) else {
+            throw .unexpectedResponse("日付を IMAP の形にできません: \(date)")
+        }
+        let responses = try await run(.uidSearch(key: .since(calendarDay)))
+        var uids: [UInt32] = []
+        for response in responses {
+            if case let .untagged(.mailboxData(.search(ids, _))) = response {
+                uids.append(contentsOf: ids.map(\.rawValue))
+            }
+        }
+        return uids.sorted()
+    }
+
+    /// UID を指定して見出しを取る。UID の小さい順に返す。サーバーにない UID は結果に含まれない。
+    public func fetchHeaders(
+        in mailbox: String, uids: [UInt32], includeGmailAttributes: Bool
+    ) async throws(IMAPError) -> [IMAPFetchedHeader] {
+        var results: [IMAPFetchedHeader] = []
+        // 1 回の命令が長くなりすぎないよう、500 件ずつに分ける
+        let sorted = Array(Set(uids)).sorted()
+        for start in stride(from: 0, to: sorted.count, by: 500) {
+            let chunk = Array(sorted[start..<min(start + 500, sorted.count)])
+            guard let set = Self.uidSet(chunk) else { continue }
+            results += try await fetch(in: mailbox, set: set, attributes: Self.headerAttributes(gmail: includeGmailAttributes))
+        }
+        return results.sorted { $0.uid < $1.uid }
+    }
+
+    /// `uid` 以降 (`uid:*`) の見出しを取る。
+    /// 注意: IMAP の決まりで、`uid` より大きいメールがなくても最後の 1 通が返ることがある。呼ぶ側で `uid` 未満を捨てること。
+    public func fetchHeaders(
+        in mailbox: String, fromUID uid: UInt32, includeGmailAttributes: Bool
+    ) async throws(IMAPError) -> [IMAPFetchedHeader] {
+        let set = MessageIdentifierSetNonEmpty<UID>(range: MessageIdentifierRange(UID(rawValue: max(uid, 1))...))
+        return try await fetch(in: mailbox, set: set, attributes: Self.headerAttributes(gmail: includeGmailAttributes))
+            .sorted { $0.uid < $1.uid }
+    }
+
+    /// 範囲内のメールのフラグ (と Gmail のラベル) だけを取り直す。消えたメールは結果に含まれない。
+    public func fetchFlags(
+        in mailbox: String, uids: ClosedRange<UInt32>, includeGmailAttributes: Bool
+    ) async throws(IMAPError) -> [IMAPFetchedHeader] {
+        let range = MessageIdentifierRange<UID>(UID(rawValue: max(uids.lowerBound, 1))...UID(rawValue: max(uids.upperBound, 1)))
+        var attributes: [FetchAttribute] = [.uid, .flags]
+        if includeGmailAttributes { attributes += [.gmailMessageID, .gmailLabels] }
+        return try await fetch(in: mailbox, set: MessageIdentifierSetNonEmpty(range: range), attributes: attributes)
+            .sorted { $0.uid < $1.uid }
+    }
+
+    private static func headerAttributes(gmail: Bool) -> [FetchAttribute] {
+        var attributes: [FetchAttribute] = [.uid, .flags, .rfc822Size, .bodySection(peek: true, .header, nil)]
+        if gmail { attributes += [.gmailMessageID, .gmailThreadID, .gmailLabels] }
+        return attributes
+    }
+
+    /// 並んだ UID を `101:102,105` のような範囲の集まりにする。
+    private static func uidSet(_ sortedUIDs: [UInt32]) -> MessageIdentifierSetNonEmpty<UID>? {
+        var ranges: [MessageIdentifierRange<UID>] = []
+        var start: UInt32?
+        var previous: UInt32 = 0
+        for uid in sortedUIDs where uid > 0 {
+            if start != nil, uid == previous + 1 {
+                previous = uid
+                continue
+            }
+            if let first = start { ranges.append(MessageIdentifierRange(UID(rawValue: first)...UID(rawValue: previous))) }
+            start = uid
+            previous = uid
+        }
+        if let first = start { ranges.append(MessageIdentifierRange(UID(rawValue: first)...UID(rawValue: previous))) }
+        return MessageIdentifierSetNonEmpty(set: MessageIdentifierSet(ranges))
+    }
+
+    private func ensureExamined(_ mailbox: String) async throws(IMAPError) {
+        if examinedMailbox != mailbox { _ = try await examine(mailbox) }
+    }
+
+    private func fetch(
+        in mailbox: String, set: MessageIdentifierSetNonEmpty<UID>, attributes: [FetchAttribute]
+    ) async throws(IMAPError) -> [IMAPFetchedHeader] {
+        try await ensureExamined(mailbox)
+        let responses = try await run(.uidFetch(.set(set), attributes, []))
+        return FetchAssembler.headers(from: responses)
     }
 
     // MARK: - 命令の送受信
@@ -180,6 +288,9 @@ enum FetchAssembler {
                 case let .uid(uid): current?.uid = uid.rawValue
                 case let .flags(flags): current?.flags = flags.map(String.init)
                 case let .rfc822Size(size): current?.size = size
+                case let .gmailMessageID(id): current?.gmailMessageID = id
+                case let .gmailThreadID(id): current?.gmailThreadID = id
+                case let .gmailLabels(labels): current?.gmailLabels = labels.map { $0.makeDisplayString() }
                 default: break
                 }
             case let .streamingBegin(kind, _):

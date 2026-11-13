@@ -35,7 +35,7 @@ public struct PreviewMailRepository: MailRepository {
 }
 
 /// 仮データの中身。件数は見本の未読数 (仕事 12、プライベート 3、副業 0、Yahoo! 7、合計 22) に合わせてある。
-private struct PreviewData {
+private final class PreviewData {
     let accounts: [Account]
     var messages: [MessageSummary] = []
     var bodies: [MessageID: MessageBody] = [:]
@@ -66,7 +66,7 @@ private struct PreviewData {
 
     // MARK: - 見本に写っている 6 通
 
-    private mutating func addFeatured(work: AccountID, personal: AccountID, yahoo: AccountID) {
+    private func addFeatured(work: AccountID, personal: AccountID, yahoo: AccountID) {
         let proposal = add(
             account: work, sender: Contact(name: "山田 さくら", address: "s.yamada@example.com"),
             subject: "企画のご提案について", preview: "先日の打ち合わせをもとに、企画書を作成しました。",
@@ -142,7 +142,7 @@ private struct PreviewData {
         ("新しいメッセージがあります", "未読のメッセージが 3 件あります。"),
     ]
 
-    private mutating func addFillers(account: AccountID, unread: Int, read: Int, starredEvery: Int) {
+    private func addFillers(account: AccountID, unread: Int, read: Int, starredEvery: Int) {
         for index in 0..<(unread + read) {
             let pick = (nextID + index) % Self.fillerSenders.count
             let (subject, preview) = Self.fillerSubjects[pick]
@@ -155,7 +155,7 @@ private struct PreviewData {
         }
     }
 
-    private mutating func addDrafts(account: AccountID) {
+    private func addDrafts(account: AccountID) {
         let me = Contact(name: "自分", address: "work@example.com")
         add(account: account, mailbox: .drafts, sender: me, subject: "Re: 企画のご提案について",
             preview: "山田さん、資料ありがとうございます。", date: today(9, 30), isRead: true)
@@ -166,7 +166,7 @@ private struct PreviewData {
     // MARK: - 部品
 
     @discardableResult
-    private mutating func add(
+    private func add(
         account: AccountID,
         mailbox: MailboxRole = .inbox,
         sender: Contact,

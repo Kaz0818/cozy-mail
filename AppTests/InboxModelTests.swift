@@ -100,3 +100,40 @@ import Testing
         #expect(AvatarView.initials(for: "") == "?")
     }
 }
+
+@MainActor @Suite struct InboxModelSwitchingTests {
+    @Test func switchingFromSamplesToRealMailReloadsAndClearsTheSampleFlag() async throws {
+        let model = InboxModel(repository: PreviewMailRepository(), isShowingSamples: true)
+        await model.load()
+        #expect(model.isShowingSamples)
+        #expect(model.accounts.count == 4)
+
+        let store = InMemoryMessageStore()
+        let account = Account(id: AccountID("a"), provider: .gmail, emailAddress: "a@gmail.com", displayName: "A")
+        await model.use(LiveMailRepository(store: store, accounts: { [account] }), showingSamples: false)
+
+        #expect(!model.isShowingSamples)
+        #expect(model.accounts.map(\.account.id) == [account.id])
+        #expect(model.messages.isEmpty)
+    }
+
+    @Test func selectionOfARemovedAccountFallsBackToTheUnifiedInbox() async throws {
+        let model = InboxModel(repository: PreviewMailRepository())
+        await model.load()
+        let yahoo = try #require(model.accounts.last?.account)
+        await model.select(.account(yahoo.id, .inbox))
+
+        await model.use(LiveMailRepository(store: InMemoryMessageStore(), accounts: { [] }), showingSamples: false)
+
+        #expect(model.selection == .unified(.inbox))
+    }
+}
+
+@Suite struct AccountErrorMessageTests {
+    @Test func everyErrorExplainsWhatToDo() {
+        #expect(AccountError.wrongPassword("Invalid credentials").userMessage.contains("アプリパスワード"))
+        #expect(AccountError.wrongPassword("Invalid credentials").userMessage.contains("Invalid credentials"))
+        #expect(AccountError.unknownProvider.userMessage.contains("Google Workspace"))
+        #expect(AccountError.alreadyAdded.userMessage.contains("すでに"))
+    }
+}

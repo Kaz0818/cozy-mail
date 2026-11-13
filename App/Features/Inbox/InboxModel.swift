@@ -27,11 +27,26 @@ final class InboxModel {
     private(set) var selectedMessageID: MessageID?
     private(set) var selectedBody: MessageBody?
     private(set) var errorMessage: String?
+    /// アカウントがまだ 1 つもなく、見本のメールを出しているとき。
+    private(set) var isShowingSamples = false
 
-    private let repository: any MailRepository
+    private var repository: any MailRepository
 
-    init(repository: any MailRepository) {
+    init(repository: any MailRepository, isShowingSamples: Bool = false) {
         self.repository = repository
+        self.isShowingSamples = isShowingSamples
+    }
+
+    /// データの出どころを差し替えて読み直す (アカウントを追加・削除したとき、同期が終わったとき)。
+    /// 選んでいたアカウントがなくなっていたら、統合受信トレイに戻す。
+    func use(_ repository: any MailRepository, showingSamples: Bool) async {
+        self.repository = repository
+        isShowingSamples = showingSamples
+        let accounts = (try? await repository.accounts()) ?? []
+        if let accountID = selection.accountID, !accounts.contains(where: { $0.id == accountID }) {
+            selection = .unified(.inbox)
+        }
+        await load()
     }
 
     static let folderOrder: [MailboxRole] = [.inbox, .starred, .unread, .sent, .drafts, .archive, .junk, .trash]

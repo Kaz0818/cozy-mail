@@ -4,10 +4,19 @@ import SwiftUI
 /// 真ん中の列: 見出し、新規作成ボタン、絞り込みタブ、メールの行 (見本の真ん中の列)。
 struct MessageListView: View {
     let model: InboxModel
+    @Environment(MailService.self) private var service
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+            if model.isShowingSamples {
+                Notice(
+                    systemImage: "sparkles",
+                    text: "これは見本のメールです。左上の「＋」からアカウントを追加すると、本物のメールが表示されます。"
+                )
+            } else if let error = service.syncError {
+                Notice(systemImage: "exclamationmark.triangle.fill", text: "受信できなかったアカウントがあります。\n\(error)", isWarning: true)
+            }
             FilterTabs(selection: model.filter) { filter in
                 Task { await model.setFilter(filter) }
             }
@@ -48,6 +57,25 @@ struct MessageListView: View {
             }
             Spacer()
             Button {
+                Task { await service.syncAll() }
+            } label: {
+                Group {
+                    if service.isSyncing {
+                        ProgressView().controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }
+                .font(.title3)
+                .frame(width: 40, height: 40)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Palette.textPrimary)
+            .glassCapsule()
+            .disabled(service.isSyncing || service.isShowingSamples)
+            .accessibilityLabel(Text("新着メールを受信"))
+            .help(Text("新着メールを受信 (⇧⌘N)"))
+            Button {
                 // T18 で作成ウィンドウを開く
             } label: {
                 Image(systemName: "square.and.pencil")
@@ -60,6 +88,27 @@ struct MessageListView: View {
             .accessibilityLabel(Text("新規作成"))
             .help(Text("新規作成 (⌘N)"))
         }
+        .padding(.horizontal, 6)
+    }
+}
+
+/// 一覧の上に出す短いお知らせ。
+private struct Notice: View {
+    let systemImage: String
+    let text: String
+    var isWarning = false
+
+    var body: some View {
+        Label {
+            Text(text).fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: systemImage)
+        }
+        .font(.callout)
+        .foregroundStyle(isWarning ? Palette.destructive : Palette.textPrimary)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard()
         .padding(.horizontal, 6)
     }
 }

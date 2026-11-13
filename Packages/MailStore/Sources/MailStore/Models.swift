@@ -27,7 +27,7 @@ public enum MailProvider: String, Sendable, Codable, CaseIterable {
     case other
 }
 
-public struct Account: Identifiable, Hashable, Sendable {
+public struct Account: Identifiable, Hashable, Sendable, Codable {
     public let id: AccountID
     public var provider: MailProvider
     public var emailAddress: String

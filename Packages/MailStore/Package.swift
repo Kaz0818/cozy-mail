@@ -7,8 +7,25 @@ let package = Package(
     products: [
         .library(name: "MailStore", targets: ["MailStore"]),
     ],
+    dependencies: [
+        .package(path: "../MailCore"),
+        .package(path: "../AccountKit"),
+    ],
     targets: [
-        .target(name: "MailStore"),
-        .testTarget(name: "MailStoreTests", dependencies: ["MailStore"]),
+        .target(
+            name: "MailStore",
+            dependencies: [
+                .product(name: "MailCore", package: "MailCore"),
+                .product(name: "AccountKit", package: "AccountKit"),
+            ]
+        ),
+        .testTarget(
+            name: "MailStoreTests",
+            dependencies: [
+                "MailStore",
+                .product(name: "MailCore", package: "MailCore"),
+                .product(name: "AccountKit", package: "AccountKit"),
+            ]
+        ),
     ]
 )
