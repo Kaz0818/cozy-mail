@@ -5,6 +5,7 @@ import SwiftUI
 struct MessageListView: View {
     let model: InboxModel
     @Environment(MailService.self) private var service
+    @FocusState private var isListFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -22,22 +23,36 @@ struct MessageListView: View {
             FilterTabs(selection: model.filter) { filter in
                 Task { await model.setFilter(filter) }
             }
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(model.messages) { message in
-                        MessageRow(
-                            message: message,
-                            accountName: model.accountName(for: message),
-                            isSelected: model.selectedMessageID == message.id,
-                            menu: menu(for: message)
-                        ) {
-                            Task { await model.selectMessage(message.id) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(model.messages) { message in
+                            MessageRow(
+                                message: message,
+                                accountName: model.accountName(for: message),
+                                isSelected: model.selectedMessageID == message.id,
+                                menu: menu(for: message)
+                            ) {
+                                isListFocused = true
+                                Task { await model.selectMessage(message.id) }
+                            }
                         }
                     }
+                }
+                // キーボードで選んだメールが見えるように、一覧を動かす
+                .onChange(of: model.selectedMessageID) { _, id in
+                    guard let id else { return }
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
                 }
             }
             .scrollContentBackground(.hidden)
             .scrollIndicators(.never)
+            // 一覧にカーソルがあるときだけ、1 文字のショートカット (↑ ↓ J K E S ⌫) を受ける
+            .focusable()
+            .focused($isListFocused)
+            .focusEffectDisabled()
+            .modifier(MessageListKeys(model: model))
+            .onAppear { isListFocused = true }
             .overlay {
                 if model.messages.isEmpty {
                     ContentUnavailableView("メールはありません", systemImage: "tray")

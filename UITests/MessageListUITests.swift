@@ -13,9 +13,9 @@ final class MessageListUITests: XCTestCase {
         app.launchArguments += ["-ui-testing", "-ApplePersistenceIgnoreState", "YES"]
         app.launch()
         // CI の Mac では、起動してもウィンドウが開かないことがある (2026-11-13 の CI で確認)。
-        // そのときは「ファイル > 新規ウィンドウ」(⌘N) で開く
+        // そのときは「ファイル > 新規ウィンドウ」(⌥⌘N) で開く (⌘N は「新規メッセージ」)
         if !app.windows.firstMatch.waitForExistence(timeout: 5) {
-            app.typeKey("n", modifierFlags: .command)
+            app.typeKey("n", modifierFlags: [.command, .option])
             XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "ウィンドウが開かない")
         }
         return app
@@ -54,5 +54,38 @@ final class MessageListUITests: XCTestCase {
 
         // 差出人のアドレスは、右の本文の欄にだけ出る (一覧には出ない)
         XCTAssertTrue(app.staticTexts["<k.tanaka@example.com>"].waitForExistence(timeout: 5), "クリックしたメールが開かない")
+    }
+
+    /// T16: 一覧で ↓ と J を押すと、次のメールが開く。
+    @MainActor
+    func testArrowKeysAndJMoveToTheNextMessage() throws {
+        let app = launch()
+        let row = findRow("preview-1", in: app)
+        row.click()
+        XCTAssertTrue(app.staticTexts["<s.yamada@example.com>"].waitForExistence(timeout: 5), "1 通目が開かない")
+
+        app.typeKey(.downArrow, modifierFlags: [])
+        app.typeKey(.downArrow, modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["<k.tanaka@example.com>"].waitForExistence(timeout: 5), "↓ で次のメールに移らない")
+
+        app.typeKey("j", modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["<shopping@mail.yahoo.example>"].waitForExistence(timeout: 5), "J で次のメールに移らない")
+
+        app.typeKey(.upArrow, modifierFlags: [])
+        XCTAssertTrue(app.staticTexts["<k.tanaka@example.com>"].waitForExistence(timeout: 5), "↑ で前のメールに戻らない")
+    }
+
+    /// T16: メニューバーに「メッセージ」メニューがあり、操作が並んでいる。
+    @MainActor
+    func testMessageMenuListsTheActions() throws {
+        let app = launch()
+        _ = findRow("preview-1", in: app)
+        let menu = app.menuBars.menuBarItems["メッセージ"]
+        XCTAssertTrue(menu.waitForExistence(timeout: 5), "「メッセージ」メニューがない")
+        menu.click()
+        for title in ["返信", "全員に返信", "転送", "アーカイブ (E)", "削除 (⌫)", "迷惑メールにする"] {
+            XCTAssertTrue(app.menuItems[title].exists, "「\(title)」がない")
+        }
+        app.typeKey(.escape, modifierFlags: [])
     }
 }

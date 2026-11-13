@@ -135,10 +135,11 @@ final class InboxModel {
 
     /// 既読・スター・アーカイブ・削除・迷惑メール。
     /// フラグの変更は、その行だけを変える。移動 (アーカイブ・削除・迷惑メール) は一覧を読み直す
-    /// (選んでいたメールが消えたら、先頭のメールを選ぶ)。
+    /// (選んでいたメールが消えたら、その次のメールを選ぶ。最後のメールだったら、新しい最後のメール)。
     func perform(_ action: MessageAction, on id: MessageID? = nil) async {
         guard !isShowingSamples, let id = id ?? selectedMessageID else { return }
         actionError = nil
+        let movedIndex = messages.firstIndex { $0.id == id }
         do {
             try await repository.perform(action, on: id)
             switch action {
@@ -146,7 +147,9 @@ final class InboxModel {
             case .markUnread: patch(id) { $0.isRead = false }
             case .star: patch(id) { $0.isStarred = true; $0.isFlagged = true }
             case .unstar: patch(id) { $0.isStarred = false; $0.isFlagged = false }
-            case .archive, .moveToTrash, .markAsJunk: await reloadMessages()
+            case .archive, .moveToTrash, .markAsJunk:
+                // 選んでいたメールが消えたら、同じ位置のメール (次のメール) を選ぶ
+                await reloadMessages(fallbackIndex: movedIndex)
             }
             await refreshCounts()
         } catch {
@@ -215,14 +218,60 @@ final class InboxModel {
         }
     }
 
-    private func reloadMessages() async {
+    /// 一覧を読み直す。選んでいたメールがなくなったら、`fallbackIndex` の位置 (なければ先頭) のメールを選ぶ。
+    private func reloadMessages(fallbackIndex: Int? = nil) async {
         do {
             messages = try await repository.messages(in: selection, filter: filter)
             let keepSelection = selectedMessageID.map { id in messages.contains { $0.id == id } } ?? false
-            if !keepSelection { await selectMessage(messages.first?.id) }
+            if !keepSelection {
+                let index = min(fallbackIndex ?? 0, messages.count - 1)
+                await selectMessage(messages.indices.contains(index) ? messages[index].id : nil)
+            }
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    // MARK: - キーボード操作 (T16)
+
+    /// 一覧の次のメールを選ぶ (`↓` / `J`)。何も選んでいなければ先頭。最後なら何もしない。
+    func selectNext() async {
+        await moveSelection(by: 1)
+    }
+
+    /// 一覧の前のメールを選ぶ (`↑` / `K`)。先頭なら何もしない。
+    func selectPrevious() async {
+        await moveSelection(by: -1)
+    }
+
+    private func moveSelection(by offset: Int) async {
+        guard !messages.isEmpty else { return }
+        guard let current = messages.firstIndex(where: { $0.id == selectedMessageID }) else {
+            await selectMessage(messages.first?.id)
+            return
+        }
+        let target = current + offset
+        guard messages.indices.contains(target) else { return }
+        await selectMessage(messages[target].id)
+    }
+
+    /// 選んでいるメールの既読と未読を入れ替える (`⇧⌘U`)。
+    func toggleRead() async {
+        guard let message = selectedMessage else { return }
+        await perform(message.isRead ? .markUnread : .markRead)
+    }
+
+    /// 選んでいるメールのスターを付け外しする (`⇧⌘L` / `S`)。
+    func toggleStar() async {
+        guard let message = selectedMessage else { return }
+        await perform(message.isStarred ? .unstar : .star)
+    }
+
+    /// 検索欄に移る合図 (`⌘F`)。数が変わったら、画面が検索欄にカーソルを置く。
+    private(set) var searchFocusRequest = 0
+
+    func requestSearchFocus() {
+        searchFocusRequest += 1
     }
 
     // MARK: - 表示用

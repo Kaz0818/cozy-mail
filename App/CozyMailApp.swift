@@ -3,12 +3,14 @@ import SwiftUI
 
 @main
 struct CozyMailApp: App {
+    static let mainWindowID = "main"
+
     @AppStorage(AppTheme.storageKey) private var themeRawValue = AppTheme.system.rawValue
     /// 画面の自動テスト (`-ui-testing` で起動) では、本物のアカウントやキーチェーンに触れないよう、メモリ上だけで動かす。
     @State private var service = ProcessInfo.processInfo.arguments.contains("-ui-testing") ? MailService.preview() : MailService.live()
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(id: Self.mainWindowID) {
             // アカウントがないうちは見本のメール、追加したら本物のメールを出す
             MainWindow()
                 .environment(service)
@@ -21,6 +23,7 @@ struct CozyMailApp: App {
         .windowBackgroundDragBehavior(.enabled)
         .defaultSize(width: 1400, height: 860)
         .commands {
+            MessageCommands()
             CommandMenu("メールボックス") {
                 Button("新着メールを受信") {
                     Task { await service.syncAll() }

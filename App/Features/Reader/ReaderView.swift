@@ -318,6 +318,7 @@ private struct AttachmentCard: View {
 private struct ReaderToolbar: View {
     let model: InboxModel
     @Binding var searchText: String
+    @FocusState private var isSearchFocused: Bool
 
     var body: some View {
         let message = model.selectedMessage
@@ -373,6 +374,9 @@ private struct ReaderToolbar: View {
                 TextField("メールを検索", text: $searchText)
                     .textFieldStyle(.plain)
                     .foregroundStyle(Palette.textPrimary)
+                    .focused($isSearchFocused)
+                    // ⌘F (メニューの「メールを検索」) でここにカーソルを置く
+                    .onChange(of: model.searchFocusRequest) { isSearchFocused = true }
             }
             .padding(.horizontal, 14)
             .frame(width: 260, height: 38)

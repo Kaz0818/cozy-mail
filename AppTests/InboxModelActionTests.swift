@@ -159,6 +159,81 @@ private final class ActionSpyRepository: MailRepository, @unchecked Sendable {
         })
     }
 
+    // MARK: - キーボード操作 (T16)
+
+    @Test func arrowKeysMoveTheSelectionAndStopAtTheEnds() async {
+        let model = InboxModel(repository: ActionSpyRepository())
+        await model.load()
+        #expect(model.selectedMessageID == MessageID("m1"))
+
+        await model.selectPrevious()
+        #expect(model.selectedMessageID == MessageID("m1"))
+        await model.selectNext()
+        #expect(model.selectedMessageID == MessageID("m2"))
+        #expect(model.selectedBody?.messageID == MessageID("m2"))
+        await model.selectNext()
+        await model.selectNext()
+        #expect(model.selectedMessageID == MessageID("m3"))
+        await model.selectPrevious()
+        #expect(model.selectedMessageID == MessageID("m2"))
+    }
+
+    /// アーカイブしたら、次のメールが選ばれる (先頭には戻らない)。
+    @Test func archivingSelectsTheNextMessage() async {
+        let model = InboxModel(repository: ActionSpyRepository())
+        await model.load()
+        await model.selectMessage(MessageID("m2"))
+
+        await model.perform(.archive)
+
+        #expect(model.messages.map(\.id.rawValue) == ["m1", "m3"])
+        #expect(model.selectedMessageID == MessageID("m3"))
+    }
+
+    @Test func deletingTheLastMessageSelectsTheNewLast() async {
+        let model = InboxModel(repository: ActionSpyRepository())
+        await model.load()
+        await model.selectMessage(MessageID("m3"))
+
+        await model.perform(.moveToTrash)
+
+        #expect(model.messages.map(\.id.rawValue) == ["m1", "m2"])
+        #expect(model.selectedMessageID == MessageID("m2"))
+    }
+
+    /// 右クリックで、選んでいない行をアーカイブしても、選んでいるメールはそのまま。
+    @Test func archivingAnotherRowKeepsTheSelection() async {
+        let model = InboxModel(repository: ActionSpyRepository())
+        await model.load()
+
+        await model.perform(.archive, on: MessageID("m3"))
+
+        #expect(model.selectedMessageID == MessageID("m1"))
+    }
+
+    @Test func toggleReadAndStarFlipTheSelectedMessage() async {
+        let model = InboxModel(repository: ActionSpyRepository())
+        await model.load()
+        #expect(model.selectedMessage?.isRead == true)
+
+        await model.toggleRead()
+        #expect(model.selectedMessage?.isRead == false)
+        await model.toggleRead()
+        #expect(model.selectedMessage?.isRead == true)
+
+        await model.toggleStar()
+        #expect(model.selectedMessage?.isStarred == true)
+        await model.toggleStar()
+        #expect(model.selectedMessage?.isStarred == false)
+    }
+
+    @Test func searchShortcutAsksTheScreenToFocusTheSearchField() {
+        let model = InboxModel(repository: ActionSpyRepository())
+        let before = model.searchFocusRequest
+        model.requestSearchFocus()
+        #expect(model.searchFocusRequest == before + 1)
+    }
+
     @Test func archiveIsOnlyOfferedForInboxMessages() async {
         let model = InboxModel(repository: ActionSpyRepository())
         await model.load()
