@@ -88,6 +88,8 @@ enum Metrics {
     static let panelRadius: CGFloat = 28
     /// 浮いたパネルどうしの隙間と、ウィンドウの端からの距離。
     static let panelGap: CGFloat = 12
+    /// ウィンドウ上端の、赤・黄・緑のボタンが乗る帯の高さ。
+    static let titleBarBand: CGFloat = 34
     static let rowRadius: CGFloat = 16
     static let panelPadding: CGFloat = 16
     static let rowSpacing: CGFloat = 4

@@ -40,7 +40,7 @@ struct MessageListView: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(model.title)
-                    .font(.title2.weight(.bold))
+                    .font(.system(size: 24, weight: .bold))
                     .foregroundStyle(Palette.textPrimary)
                 Text(model.subtitle)
                     .font(.subheadline)

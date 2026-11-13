@@ -13,8 +13,7 @@ struct SidebarView: View {
                 foldersSection
             }
             .padding(.horizontal, 12)
-            // 上はウィンドウの赤・黄・緑のボタンが乗るので空けておく
-            .padding(.top, 44)
+            .padding(.top, 20)
             .padding(.bottom, 12)
         }
         .scrollContentBackground(.hidden)

@@ -27,6 +27,7 @@ struct AppBackground: View {
 /// 下地の網目グラデーションの上に、ぼかした艶のある「しずく」をいくつか重ねて、液体の膨らみに見せる。
 private struct LiquidWaves: View {
     let time: TimeInterval
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         GeometryReader { proxy in
@@ -36,6 +37,13 @@ private struct LiquidWaves: View {
                 ForEach(Self.blobs.indices, id: \.self) { index in
                     blob(Self.blobs[index], in: size)
                 }
+                // 周りを少し暗くして奥行きを出す (中心が明るく、端が沈む)
+                RadialGradient(
+                    colors: [.clear, .black.opacity(colorScheme == .dark ? 0.5 : 0.14)],
+                    center: .center,
+                    startRadius: min(size.width, size.height) * 0.25,
+                    endRadius: max(size.width, size.height) * 0.75
+                )
             }
             .frame(width: size.width, height: size.height)
             .clipped()
@@ -84,19 +92,29 @@ private struct LiquidWaves: View {
         Blob(x: 0.05, y: 0.9, width: 0.4, height: 0.25, angle: 30, speed: 0.07),
     ]
 
-    /// 艶のあるしずく: 上が光り、下が深い色の楕円を、強くぼかす。
+    /// 艶のあるしずく: 上が光り、下が深い色の楕円をぼかし、上の縁に細い光の反射を載せる。
     private func blob(_ blob: Blob, in size: CGSize) -> some View {
         let drift = sin(time * blob.speed + blob.x * 10) * 0.03
-        return Capsule()
-            .fill(LinearGradient(
-                colors: [Palette.waveGlow.opacity(0.85), Palette.brand.opacity(0.7), Palette.waveDeep.opacity(0.9)],
-                startPoint: .top,
-                endPoint: .bottom
-            ))
-            .frame(width: size.width * blob.width, height: size.height * blob.height)
-            .rotationEffect(.degrees(blob.angle + drift * 100))
-            .position(x: size.width * (blob.x + drift), y: size.height * (blob.y - drift))
-            .blur(radius: min(size.width, size.height) * 0.06)
+        let width = size.width * blob.width
+        let height = size.height * blob.height
+        return ZStack {
+            Capsule()
+                .fill(LinearGradient(
+                    colors: [Palette.waveGlow.opacity(0.9), Palette.brand.opacity(0.75), Palette.waveDeep],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
+                .blur(radius: min(size.width, size.height) * 0.035)
+            // 光の反射: しずくの上側に乗る、細く明るい帯
+            Capsule()
+                .fill(.white.opacity(colorScheme == .dark ? 0.35 : 0.7))
+                .frame(width: width * 0.6, height: height * 0.12)
+                .offset(y: -height * 0.28)
+                .blur(radius: min(size.width, size.height) * 0.012)
+        }
+        .frame(width: width, height: height)
+        .rotationEffect(.degrees(blob.angle + drift * 100))
+        .position(x: size.width * (blob.x + drift), y: size.height * (blob.y - drift))
     }
 }
 

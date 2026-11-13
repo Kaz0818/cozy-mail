@@ -54,7 +54,7 @@ private struct ReaderHeader: View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
                 Text(message.subject)
-                    .font(.title.weight(.bold))
+                    .font(.system(size: 28, weight: .bold))
                     .foregroundStyle(Palette.textPrimary)
                     .textSelection(.enabled)
                 Spacer()

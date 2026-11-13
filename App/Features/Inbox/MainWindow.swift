@@ -26,7 +26,8 @@ struct MainWindow: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .glassPanel()
         }
-        .padding(Metrics.panelGap)
+        // 上はウィンドウの赤・黄・緑のボタンのための帯。パネルの角と重ならないよう、パネルはその下から始める
+        .padding(EdgeInsets(top: Metrics.titleBarBand, leading: Metrics.panelGap, bottom: Metrics.panelGap, trailing: Metrics.panelGap))
         .background(AppBackground())
         .tint(Palette.accent)
         .frame(minWidth: 1000, minHeight: 620)
