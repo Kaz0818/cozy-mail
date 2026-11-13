@@ -5,9 +5,14 @@ import SwiftUI
 /// ボタンは T15 / T18 で動くようにする。いまは見た目だけ。
 struct ReaderView: View {
     let model: InboxModel
+    @State private var searchText = ""
 
     var body: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 0) {
+            ReaderToolbar(searchText: $searchText)
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
+                .padding(.bottom, 8)
             if let message = model.selectedMessage {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 18) {
@@ -16,7 +21,7 @@ struct ReaderView: View {
                         if let body = model.selectedBody {
                             Text(body.text)
                                 .font(.body)
-                                .lineSpacing(6)
+                                .lineSpacing(7)
                                 .foregroundStyle(Palette.textPrimary)
                                 .textSelection(.enabled)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -27,15 +32,17 @@ struct ReaderView: View {
                             ProgressView().frame(maxWidth: .infinity)
                         }
                     }
-                    .padding(28)
-                    .frame(maxWidth: 820, alignment: .leading)
+                    .padding(.horizontal, 32)
+                    .padding(.vertical, 20)
+                    .frame(maxWidth: 900, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .scrollIndicators(.never)
             } else {
                 ContentUnavailableView("メールを選んでください", systemImage: "envelope.open")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .toolbar { ReaderToolbar() }
     }
 }
 
@@ -114,22 +121,55 @@ private struct AttachmentCard: View {
         }
         .padding(16)
         .frame(maxWidth: 520)
-        .glassPanel(cornerRadius: Metrics.rowRadius)
+        .glassCard()
     }
 }
 
-/// 本文の上のツールバー。macOS 26 では OS がガラスにしてくれる。
-private struct ReaderToolbar: ToolbarContent {
-    var body: some ToolbarContent {
-        ToolbarItemGroup {
-            Button("返信", systemImage: "arrowshape.turn.up.left") {}
-            Button("全員に返信", systemImage: "arrowshape.turn.up.left.2") {}
+/// 本文パネルの上に並ぶボタンと検索欄 (見本の右上)。返信と全員に返信は 1 つのカプセルにまとめる。
+/// ボタンは T15 / T18 で動くようにする。いまは見た目だけ。
+private struct ReaderToolbar: View {
+    @Binding var searchText: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 0) {
+                ToolbarIcon(title: "返信", systemImage: "arrowshape.turn.up.left")
+                ToolbarIcon(title: "全員に返信", systemImage: "arrowshape.turn.up.left.2")
+            }
+            .glassCapsule()
+            ToolbarIcon(title: "削除", systemImage: "trash").glassCapsule()
+            ToolbarIcon(title: "アーカイブ", systemImage: "archivebox").glassCapsule()
+            ToolbarIcon(title: "フラグ", systemImage: "flag").glassCapsule()
+            ToolbarIcon(title: "その他", systemImage: "ellipsis").glassCapsule()
+            Spacer(minLength: 16)
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(Palette.textSecondary)
+                TextField("メールを検索", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .foregroundStyle(Palette.textPrimary)
+            }
+            .padding(.horizontal, 14)
+            .frame(width: 260, height: 38)
+            .glassCapsule()
         }
-        ToolbarItemGroup {
-            Button("削除", systemImage: "trash") {}
-            Button("アーカイブ", systemImage: "archivebox") {}
-            Button("フラグ", systemImage: "flag") {}
-            Button("その他", systemImage: "ellipsis") {}
+    }
+}
+
+private struct ToolbarIcon: View {
+    let title: LocalizedStringKey
+    let systemImage: String
+
+    var body: some View {
+        Button {} label: {
+            Image(systemName: systemImage)
+                .font(.system(size: 16, weight: .medium))
+                .foregroundStyle(Palette.textPrimary)
+                .frame(width: 44, height: 38)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help(Text(title))
+        .accessibilityLabel(Text(title))
     }
 }

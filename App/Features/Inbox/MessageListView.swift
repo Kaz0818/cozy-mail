@@ -25,6 +25,7 @@ struct MessageListView: View {
                 }
             }
             .scrollContentBackground(.hidden)
+            .scrollIndicators(.never)
             .overlay {
                 if model.messages.isEmpty {
                     ContentUnavailableView("メールはありません", systemImage: "tray")
@@ -32,7 +33,7 @@ struct MessageListView: View {
             }
         }
         .padding(.horizontal, 12)
-        .padding(.top, 8)
+        .padding(.top, 22)
     }
 
     private var header: some View {
@@ -69,23 +70,21 @@ struct FilterTabs: View {
     let onSelect: (MessageFilter) -> Void
 
     var body: some View {
-        GlassEffectContainer(spacing: 8) {
-            HStack(spacing: 8) {
-                ForEach(MessageFilter.allCases, id: \.self) { filter in
-                    let isSelected = filter == selection
-                    Button {
-                        onSelect(filter)
-                    } label: {
-                        Text(title(filter))
-                            .font(.callout.weight(isSelected ? .semibold : .regular))
-                            .foregroundStyle(isSelected ? Palette.onAccentFill : Palette.textPrimary)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 6)
-                    }
-                    .buttonStyle(.plain)
-                    .glassCapsule(isProminent: isSelected)
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+        HStack(spacing: 8) {
+            ForEach(MessageFilter.allCases, id: \.self) { filter in
+                let isSelected = filter == selection
+                Button {
+                    onSelect(filter)
+                } label: {
+                    Text(title(filter))
+                        .font(.callout.weight(isSelected ? .semibold : .regular))
+                        .foregroundStyle(isSelected ? Palette.onAccentFill : Palette.textPrimary)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
                 }
+                .buttonStyle(.plain)
+                .glassCapsule(isProminent: isSelected)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
             }
         }
         .padding(.horizontal, 6)

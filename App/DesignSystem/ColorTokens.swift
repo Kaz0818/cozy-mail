@@ -21,6 +21,9 @@ struct ColorToken: Sendable, Hashable, CustomStringConvertible {
     /// 一番奥の背景のグラデーション (上と下)。
     static let backgroundTop = ColorToken(light: 0xE6F6F4, dark: 0x071C1C)
     static let backgroundBottom = ColorToken(light: 0xCFEFEB, dark: 0x0D2B2A)
+    /// 背景の波の濃い部分と、光っている部分。ガラス越しに形が見えるよう、はっきり差を付ける。
+    static let waveDeep = ColorToken(light: 0x4FBFB6, dark: 0x0E4A47)
+    static let waveGlow = ColorToken(light: 0xFFFFFF, dark: 0x2FA39A)
     /// 「透明度を下げる」のときにガラスの代わりに使う面。
     static let panel = ColorToken(light: 0xF4FBFA, dark: 0x0F2827)
     static let textPrimary = ColorToken(light: 0x0F1F1E, dark: 0xEAF6F5)
@@ -46,6 +49,8 @@ enum Palette {
     static let backgroundTop = Color(.backgroundTop)
     static let backgroundBottom = Color(.backgroundBottom)
     static let panel = Color(.panel)
+    static let waveDeep = Color(.waveDeep)
+    static let waveGlow = Color(.waveGlow)
     static let textPrimary = Color(.textPrimary)
     static let textSecondary = Color(.textSecondary)
     static let destructive = Color.red
@@ -80,7 +85,9 @@ enum ContrastRatio {
 
 /// 角の丸みと余白 (SPEC 8.3)。
 enum Metrics {
-    static let panelRadius: CGFloat = 24
+    static let panelRadius: CGFloat = 28
+    /// 浮いたパネルどうしの隙間と、ウィンドウの端からの距離。
+    static let panelGap: CGFloat = 12
     static let rowRadius: CGFloat = 16
     static let panelPadding: CGFloat = 16
     static let rowSpacing: CGFloat = 4

@@ -13,6 +13,10 @@ struct CozyMailApp: App {
                     AppTheme.stored(themeRawValue).apply()
                 }
         }
+        // タイトルバーを消し、中身をウィンドウ全体に広げる (赤・黄・緑のボタンはサイドバーのパネルの上に乗る)
+        .windowStyle(.hiddenTitleBar)
+        .windowBackgroundDragBehavior(.enabled)
+        .defaultSize(width: 1400, height: 860)
 
         Settings {
             TabView {
