@@ -98,6 +98,8 @@ public struct IMAPFetchedHeader: Sendable, Hashable {
     public var gmailThreadID: UInt64?
     /// Gmail だけ: ラベル (`X-GM-LABELS`)。`\Inbox`、`\Sent` などのシステムラベルと、自分で作ったラベル。
     public var gmailLabels: [String]
+    /// メール全体 (`BODY[]`) を取ったときの生データ。見出しだけのときは空。
+    public var messageData: Data
 
     public init(
         uid: UInt32,
@@ -106,7 +108,8 @@ public struct IMAPFetchedHeader: Sendable, Hashable {
         headerData: Data = Data(),
         gmailMessageID: UInt64? = nil,
         gmailThreadID: UInt64? = nil,
-        gmailLabels: [String] = []
+        gmailLabels: [String] = [],
+        messageData: Data = Data()
     ) {
         self.uid = uid
         self.flags = flags
@@ -115,6 +118,7 @@ public struct IMAPFetchedHeader: Sendable, Hashable {
         self.gmailMessageID = gmailMessageID
         self.gmailThreadID = gmailThreadID
         self.gmailLabels = gmailLabels
+        self.messageData = messageData
     }
 
     public var isSeen: Bool {
@@ -133,6 +137,8 @@ public enum IMAPError: Error, Equatable, CustomStringConvertible {
     case connectionClosed
     /// 応答の形が想定外。
     case unexpectedResponse(String)
+    /// 指定した UID のメールがサーバーにない (削除された、またはフォルダが作り直された)。
+    case messageNotFound(uid: UInt32)
 
     public var description: String {
         switch self {
@@ -141,6 +147,7 @@ public enum IMAPError: Error, Equatable, CustomStringConvertible {
         case let .commandFailed(reason): "サーバーが処理を断りました: \(reason)"
         case .connectionClosed: "サーバーとの接続が切れました"
         case let .unexpectedResponse(reason): "サーバーの応答を読めませんでした: \(reason)"
+        case .messageNotFound: "メールがサーバーに見つかりませんでした。削除されたか、移動された可能性があります"
         }
     }
 }

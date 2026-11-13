@@ -132,6 +132,16 @@ public actor IMAPSession {
         return FetchAssembler.headers(from: responses).sorted { $0.uid > $1.uid }
     }
 
+    /// メール 1 通の全体 (ヘッダー・本文・添付) を取る。`BODY.PEEK[]` なので既読にはならない。
+    public func fetchMessage(in mailbox: String, uid: UInt32) async throws(IMAPError) -> Data {
+        let set = MessageIdentifierSetNonEmpty<UID>(range: MessageIdentifierRange(UID(rawValue: uid)))
+        let fetched = try await fetch(in: mailbox, set: set, attributes: [.uid, .bodySection(peek: true, .complete, nil)])
+        guard let message = fetched.first(where: { $0.uid == uid }), !message.messageData.isEmpty else {
+            throw .messageNotFound(uid: uid)
+        }
+        return message.messageData
+    }
+
     /// フォルダの未読数をサーバーに聞く (`STATUS (UNSEEN)`)。フォルダを開かずに聞ける。
     public func unreadCount(of mailbox: String) async throws(IMAPError) -> Int {
         let responses = try await run(.status(MailboxName(ByteBuffer(string: mailbox)), [.unseenCount]))
@@ -277,7 +287,9 @@ enum FetchAssembler {
     static func headers(from responses: [Response]) -> [IMAPFetchedHeader] {
         var results: [IMAPFetchedHeader] = []
         var current: IMAPFetchedHeader?
-        var isReadingHeader = false
+        /// いま届いている塊を、どこに貯めるか。
+        enum Target { case none, header, message }
+        var target = Target.none
         for response in responses {
             guard case let .fetch(part) = response else { continue }
             switch part {
@@ -294,11 +306,21 @@ enum FetchAssembler {
                 default: break
                 }
             case let .streamingBegin(kind, _):
-                if case let .body(section, _) = kind { isReadingHeader = section.kind == .header }
+                switch kind {
+                case let .body(section, _) where section.part == [] && section.kind == .header: target = .header
+                case let .body(section, _) where section.part == [] && section.kind == .complete: target = .message
+                case .rfc822Header: target = .header
+                case .rfc822: target = .message
+                default: target = .none
+                }
             case let .streamingBytes(bytes):
-                if isReadingHeader { current?.headerData.append(contentsOf: bytes.readableBytesView) }
+                switch target {
+                case .header: current?.headerData.append(contentsOf: bytes.readableBytesView)
+                case .message: current?.messageData.append(contentsOf: bytes.readableBytesView)
+                case .none: break
+                }
             case .streamingEnd:
-                isReadingHeader = false
+                target = .none
             case .finish:
                 if let message = current { results.append(message) }
                 current = nil

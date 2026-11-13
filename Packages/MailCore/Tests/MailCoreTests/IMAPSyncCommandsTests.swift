@@ -8,6 +8,8 @@ import Testing
         "Subject: \(subject)\r\nFrom: a@example.com\r\n\r\n"
     }
 
+    private static let fullMessage = "Subject: hello\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n本文です。\r\n"
+
     /// Gmail の実際の応答と同じ形の台本。UID 101・102・105 の 3 通がある。
     @Sendable private static func gmailScript(_ command: String) -> [String] {
         let upper = command.uppercased()
@@ -17,6 +19,10 @@ import Testing
         }
         if upper.hasPrefix("STATUS") { return ["* STATUS INBOX (UNSEEN 12)", "TAG OK STATUS completed"] }
         if upper.hasPrefix("UID SEARCH") { return ["* SEARCH 101 102 105", "TAG OK SEARCH completed"] }
+        if upper.hasPrefix("UID FETCH"), upper.contains("BODY.PEEK[]") {
+            let raw = fullMessage
+            return ["* 1 FETCH (UID 101 BODY[] {\(raw.utf8.count)}\r\n\(raw))", "TAG OK FETCH completed"]
+        }
         if upper.hasPrefix("UID FETCH"), upper.contains("BODY.PEEK[HEADER]") {
             let first = header("one")
             let second = header("two")
@@ -136,6 +142,35 @@ import Testing
             // フォルダ名は引用符付きでも付かなくても正しい IMAP
             #expect(server.receivedCommands.contains { ["STATUS INBOX (UNSEEN)", "STATUS \"INBOX\" (UNSEEN)"].contains($0) })
         }
+    }
+
+    @Test func fetchesTheWholeMessageWithoutMarkingItRead() async throws {
+        try await withSession { session, server in
+            let data = try await session.fetchMessage(in: "INBOX", uid: 101)
+
+            #expect(data == Data(Self.fullMessage.utf8))
+            #expect(try MIMEParser.parse(data).textBody == "本文です。\n")
+            let fetch = try #require(server.receivedCommands.first { $0.hasPrefix("UID FETCH") })
+            // PEEK: 本文を取っても既読 (\Seen) にしない
+            #expect(fetch.hasPrefix("UID FETCH 101 ") && fetch.contains("BODY.PEEK[]"))
+        }
+    }
+
+    @Test func missingMessageThrows() async throws {
+        let script: FakeIMAPServer.Responder = { command in
+            if command.uppercased().hasPrefix("UID FETCH") { return ["TAG OK FETCH completed"] }
+            return Self.gmailScript(command)
+        }
+        let server = try await FakeIMAPServer(respond: script)
+        let session = try await IMAPSession.connect(
+            to: IMAPServer(host: "127.0.0.1", port: server.port, security: .plaintextForTesting),
+            credentials: .password(username: "me", password: "pw")
+        )
+        await #expect(throws: IMAPError.messageNotFound(uid: 999)) {
+            _ = try await session.fetchMessage(in: "INBOX", uid: 999)
+        }
+        await session.logout()
+        await server.shutdown()
     }
 
     @Test func emptyUIDListFetchesNothing() async throws {
