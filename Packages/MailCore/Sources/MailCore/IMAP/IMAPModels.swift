@@ -77,13 +77,37 @@ public struct IMAPMailboxStatus: Sendable, Hashable {
     }
 }
 
-/// `FETCH` で取った 1 通分の見出し。
+/// `FETCH` で取った 1 通分の見出し。フラグだけを取り直したときは `headerData` が空になる。
 public struct IMAPFetchedHeader: Sendable, Hashable {
     public var uid: UInt32
     public var flags: [String]
     public var size: Int?
     /// ヘッダー部分の生データ。`MIMEParser.parse` で読める。
     public var headerData: Data
+    /// Gmail だけ: どのフォルダから見ても同じになるメールの ID (`X-GM-MSGID`)。
+    public var gmailMessageID: UInt64?
+    /// Gmail だけ: スレッドの ID (`X-GM-THRID`)。
+    public var gmailThreadID: UInt64?
+    /// Gmail だけ: ラベル (`X-GM-LABELS`)。`\Inbox`、`\Sent` などのシステムラベルと、自分で作ったラベル。
+    public var gmailLabels: [String]
+
+    public init(
+        uid: UInt32,
+        flags: [String],
+        size: Int? = nil,
+        headerData: Data = Data(),
+        gmailMessageID: UInt64? = nil,
+        gmailThreadID: UInt64? = nil,
+        gmailLabels: [String] = []
+    ) {
+        self.uid = uid
+        self.flags = flags
+        self.size = size
+        self.headerData = headerData
+        self.gmailMessageID = gmailMessageID
+        self.gmailThreadID = gmailThreadID
+        self.gmailLabels = gmailLabels
+    }
 
     public var isSeen: Bool {
         flags.contains { $0.caseInsensitiveCompare("\\Seen") == .orderedSame }
