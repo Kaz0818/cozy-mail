@@ -10,7 +10,11 @@ public actor IMAPSession {
     private let collector: ResponseCollector
     private var nextTag = 1
     /// いま開いているフォルダ。同じフォルダへの命令が続くときに、開き直さないため。
-    private var examinedMailbox: String?
+    /// いま開いているフォルダと、読み書きできる (SELECT) か読むだけ (EXAMINE) か。
+    /// 同じフォルダへの命令が続くときに、開き直さないため。
+    private var openMailbox: (name: String, writable: Bool)?
+    /// サーバーが対応している機能 (大文字)。初めて必要になったときに CAPABILITY で聞く。
+    private var capabilities: Set<String>?
 
     private init(channel: Channel, collector: ResponseCollector) {
         self.channel = channel
@@ -93,9 +97,9 @@ public actor IMAPSession {
 
     /// 読み取り専用でフォルダを開き、件数などを返す。
     public func examine(_ mailbox: String) async throws(IMAPError) -> IMAPMailboxStatus {
-        examinedMailbox = nil
+        openMailbox = nil
         let responses = try await run(.examine(MailboxName(ByteBuffer(string: mailbox))))
-        examinedMailbox = mailbox
+        openMailbox = (mailbox, false)
         var status = IMAPMailboxStatus(messageCount: 0, uidValidity: 0, uidNext: nil)
         for response in responses {
             switch response {
@@ -234,8 +238,67 @@ public actor IMAPSession {
         return MessageIdentifierSetNonEmpty(set: MessageIdentifierSet(ranges))
     }
 
+    /// 読むために開く。読み書きで開いていれば、そのまま使う。
     private func ensureExamined(_ mailbox: String) async throws(IMAPError) {
-        if examinedMailbox != mailbox { _ = try await examine(mailbox) }
+        if openMailbox?.name != mailbox { _ = try await examine(mailbox) }
+    }
+
+    /// 書き込む (フラグを変える・移す) ために、読み書きで開く。
+    private func ensureSelected(_ mailbox: String) async throws(IMAPError) {
+        guard openMailbox?.name != mailbox || openMailbox?.writable != true else { return }
+        openMailbox = nil
+        _ = try await run(.select(MailboxName(ByteBuffer(string: mailbox))))
+        openMailbox = (mailbox, true)
+    }
+
+    private func serverCapabilities() async throws(IMAPError) -> Set<String> {
+        if let capabilities { return capabilities }
+        var found: Set<String> = []
+        for response in try await run(.capability) {
+            if case let .untagged(.capabilityData(list)) = response {
+                found.formUnion(list.map { String($0).uppercased() })
+            }
+        }
+        capabilities = found
+        return found
+    }
+
+    // MARK: - 整理の操作
+
+    /// フラグ (`\Seen`、`\Flagged` など) を付ける・外す。
+    public func setFlags(_ flags: [String], add: Bool, in mailbox: String, uids: [UInt32]) async throws(IMAPError) {
+        guard let set = Self.uidSet(Array(Set(uids)).sorted()) else { return }
+        try await ensureSelected(mailbox)
+        let list = flags.map { Flag($0) }
+        _ = try await run(.uidStore(.set(set), [], .flags(add ? .add(silent: true, list: list) : .remove(silent: true, list: list))))
+    }
+
+    /// Gmail のラベルを付ける・外す。アーカイブは「すべてのメール」で `\Inbox` を外すこと。
+    public func setGmailLabels(_ labels: [String], add: Bool, in mailbox: String, uids: [UInt32]) async throws(IMAPError) {
+        guard let set = Self.uidSet(Array(Set(uids)).sorted()) else { return }
+        try await ensureSelected(mailbox)
+        let list = labels.map { GmailLabel(ByteBuffer(string: $0)) }
+        _ = try await run(.uidStore(
+            .set(set), [], .gmailLabels(add ? .add(silent: true, gmailLabels: list) : .remove(silent: true, gmailLabels: list))
+        ))
+    }
+
+    /// 別のフォルダへ移す。MOVE があれば使い、なければ COPY して「削除の印」を付け、UIDPLUS があればそのメールだけを消す。
+    /// UIDPLUS がないときは EXPUNGE しない (フォルダ内のほかの「削除の印」のメールまで消えてしまうため)。
+    public func move(uids: [UInt32], from mailbox: String, to target: String) async throws(IMAPError) {
+        guard let set = Self.uidSet(Array(Set(uids)).sorted()) else { return }
+        try await ensureSelected(mailbox)
+        let destination = MailboxName(ByteBuffer(string: target))
+        let capabilities = try await serverCapabilities()
+        if capabilities.contains("MOVE") {
+            _ = try await run(.uidMove(.set(set), destination))
+            return
+        }
+        _ = try await run(.uidCopy(.set(set), destination))
+        _ = try await run(.uidStore(.set(set), [], .flags(.add(silent: true, list: [Flag("\\Deleted")]))))
+        if capabilities.contains("UIDPLUS") {
+            _ = try await run(.uidExpunge(.set(set)))
+        }
     }
 
     private func fetch(
