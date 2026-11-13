@@ -23,6 +23,8 @@ targets:
       - package: MailCore
       - package: MailStore
       - package: AccountKit
+      - package: AccountKit
+        product: AccountKitKeychain
     entitlements:
       path: App/CozyMail.entitlements
       properties:

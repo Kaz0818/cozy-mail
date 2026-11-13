@@ -4,6 +4,7 @@ import Foundation
 import Security
 
 /// macOS のキーチェーンに保存する。この Mac だけに置き、iCloud には同期しない。
+/// アプリを作り直すたびに「キーチェーンを使おうとしています」と聞かれることがある (署名が変わるため)。「常に許可」を選ぶ。
 public struct KeychainSecretStore: SecretStore {
     private let service: String
 
@@ -37,7 +38,6 @@ public struct KeychainSecretStore: SecretStore {
         if status == errSecItemNotFound {
             var item = baseQuery(key)
             item[kSecValueData as String] = data
-            item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             let addStatus = SecItemAdd(item as CFDictionary, nil)
             guard addStatus == errSecSuccess else { throw SecretStoreError(status: addStatus, operation: "保存") }
         } else if status != errSecSuccess {
@@ -51,7 +51,8 @@ public struct KeychainSecretStore: SecretStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: key,
             kSecAttrSynchronizable as String: false,
-            kSecUseDataProtectionKeychain as String: true,
+            // データ保護キーチェーン (kSecUseDataProtectionKeychain) は、有料の開発者アカウントで署名したアプリでないと
+            // 使えない (errSecMissingEntitlement)。自分の Mac で署名して使う (SPEC 2.1) ので、通常のキーチェーンを使う
         ]
     }
 }

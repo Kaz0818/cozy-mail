@@ -6,15 +6,13 @@ import SwiftUI
 /// 標準の `NavigationSplitView` は列にふつうのウィンドウの背景を敷くので、背景の波が隠れてガラスの質感が出ない。
 /// そのため、パネルを自分で並べる。
 struct MainWindow: View {
-    @State private var model: InboxModel
-
-    init(repository: any MailRepository) {
-        _model = State(initialValue: InboxModel(repository: repository))
-    }
+    @Environment(MailService.self) private var service
+    @State private var model = InboxModel(repository: PreviewMailRepository(), isShowingSamples: true)
+    @State private var isAddingAccount = false
 
     var body: some View {
         HStack(spacing: Metrics.panelGap) {
-            SidebarView(model: model)
+            SidebarView(model: model, onAddAccount: { isAddingAccount = true })
                 .frame(width: 250)
                 .frame(maxHeight: .infinity, alignment: .top)
                 .glassPanel()
@@ -32,11 +30,17 @@ struct MainWindow: View {
         .tint(Palette.accent)
         .frame(minWidth: 1000, minHeight: 620)
         .ignoresSafeArea()
-        .task { await model.load() }
+        .sheet(isPresented: $isAddingAccount) { AddAccountSheet() }
+        .task { await service.start() }
+        // アカウントの追加・削除や同期のたびに、画面のデータを読み直す
+        .task(id: service.revision) {
+            await model.use(service.repository, showingSamples: service.isShowingSamples)
+        }
     }
 }
 
 #Preview("メインウィンドウ") {
-    MainWindow(repository: PreviewMailRepository())
+    MainWindow()
+        .environment(MailService.preview())
         .frame(width: 1400, height: 820)
 }

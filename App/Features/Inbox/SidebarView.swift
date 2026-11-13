@@ -4,6 +4,7 @@ import SwiftUI
 /// 左の列: アプリ名、アカウント一覧、統合受信トレイ、フォルダ一覧 (見本の左の列)。
 struct SidebarView: View {
     let model: InboxModel
+    let onAddAccount: () -> Void
 
     var body: some View {
         ScrollView {
@@ -38,9 +39,7 @@ struct SidebarView: View {
 
     private var accountsSection: some View {
         VStack(alignment: .leading, spacing: Metrics.rowSpacing) {
-            SectionHeader(title: "アカウント", systemImage: "plus", actionLabel: "アカウントを追加") {
-                // T11 / T12 でアカウント追加の画面を開く
-            }
+            SectionHeader(title: "アカウント", systemImage: "plus", actionLabel: "アカウントを追加", action: onAddAccount)
             ForEach(model.accounts) { item in
                 SidebarRow(
                     title: item.account.displayName,
