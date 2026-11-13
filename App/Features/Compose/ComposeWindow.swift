@@ -43,8 +43,11 @@ private struct ComposeForm: View {
     @State private var importError: String?
     @FocusState private var focus: Field?
 
-    enum Field {
+    enum Field: Hashable {
         case to
+        case cc
+        case bcc
+        case subject
         case body
     }
 
@@ -153,11 +156,10 @@ private struct ComposeForm: View {
                 .help(Text("送信 (⌘↩)"))
                 .accessibilityIdentifier("compose.send")
             }
-            recipientRow("宛先", text: $model.to, identifier: "compose.to")
-                .focused($focus, equals: .to)
+            recipientRow("宛先", text: $model.to, field: .to, identifier: "compose.to")
             if model.showsCcAndBcc {
-                recipientRow("Cc", text: $model.cc, identifier: "compose.cc")
-                recipientRow("Bcc", text: $model.bcc, identifier: "compose.bcc")
+                recipientRow("Cc", text: $model.cc, field: .cc, identifier: "compose.cc")
+                recipientRow("Bcc", text: $model.bcc, field: .bcc, identifier: "compose.bcc")
             } else {
                 HStack {
                     Spacer()
@@ -173,6 +175,7 @@ private struct ComposeForm: View {
                     .textFieldStyle(.plain)
                     .font(.body.weight(.semibold))
                     .foregroundStyle(Palette.textPrimary)
+                    .focused($focus, equals: .subject)
                     .accessibilityIdentifier("compose.subject")
             }
         }
@@ -181,12 +184,13 @@ private struct ComposeForm: View {
         .padding(.bottom, 10)
     }
 
-    private func recipientRow(_ title: String, text: Binding<String>, identifier: String) -> some View {
+    private func recipientRow(_ title: String, text: Binding<String>, field: Field, identifier: String) -> some View {
         HStack(spacing: 10) {
             fieldLabel(title)
             TextField(title, text: text, prompt: Text("名前 <you@example.com>, ..."))
                 .textFieldStyle(.plain)
                 .foregroundStyle(Palette.textPrimary)
+                .focused($focus, equals: field)
                 .accessibilityIdentifier(identifier)
         }
     }
