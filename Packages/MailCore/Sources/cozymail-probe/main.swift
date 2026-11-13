@@ -9,11 +9,11 @@ import Darwin
 
 /// 実際のメールサーバーにつないで、フォルダ一覧と受信トレイの最新 20 通の件名を表示する確認用のツール。
 ///
-/// アプリパスワードで (Yahoo! など):
+/// アプリパスワードで (Gmail も Yahoo! も。準備は docs/app-passwords.md):
 ///   swift run --package-path Packages/MailCore cozymail-probe <IMAP サーバー> <メールアドレス> [ポート]
 ///   パスワードは環境変数 COZYMAIL_PASSWORD があればそれを使い、なければ入力を求める。
 ///
-/// Google ログインで (Gmail):
+/// Google ログインで (Gmail。P2 で保留中。準備は docs/google-oauth-setup.md):
 ///   COZYMAIL_GOOGLE_CLIENT_ID=... COZYMAIL_GOOGLE_CLIENT_SECRET=... \
 ///   swift run --package-path Packages/MailCore cozymail-probe --gmail [メールアドレス]
 ///   ブラウザが開くので、ログインするアカウントを選ぶ。
