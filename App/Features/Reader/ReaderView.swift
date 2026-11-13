@@ -12,7 +12,7 @@ struct ReaderView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ReaderToolbar(searchText: $searchText)
+            ReaderToolbar(model: model, searchText: $searchText)
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 8)
@@ -41,7 +41,12 @@ private struct MessageContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ReaderHeader(message: message, recipients: model.selectedBody?.to ?? [])
+            ReaderHeader(
+                message: message,
+                recipients: model.selectedBody?.to ?? [],
+                canToggleStar: model.canPerform(message.isStarred ? .unstar : .star, on: message),
+                onToggleStar: { Task { await model.perform(message.isStarred ? .unstar : .star, on: message.id) } }
+            )
                 .padding(.horizontal, 32)
                 .padding(.top, 12)
             Divider()
@@ -213,6 +218,8 @@ struct AttachmentFile: FileDocument {
 private struct ReaderHeader: View {
     let message: MessageSummary
     let recipients: [Contact]
+    let canToggleStar: Bool
+    let onToggleStar: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -222,10 +229,15 @@ private struct ReaderHeader: View {
                     .foregroundStyle(Palette.textPrimary)
                     .textSelection(.enabled)
                 Spacer()
-                Image(systemName: message.isStarred ? "star.fill" : "star")
-                    .font(.title2)
-                    .foregroundStyle(message.isStarred ? Color.yellow : Palette.textSecondary)
-                    .accessibilityLabel(Text(message.isStarred ? "スター付き" : "スターなし"))
+                Button(action: onToggleStar) {
+                    Image(systemName: message.isStarred ? "star.fill" : "star")
+                        .font(.title2)
+                        .foregroundStyle(message.isStarred ? Color.yellow : Palette.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canToggleStar)
+                .help(Text(message.isStarred ? "スターを外す" : "スターを付ける"))
+                .accessibilityLabel(Text(message.isStarred ? "スターを外す" : "スターを付ける"))
             }
             HStack(alignment: .top, spacing: 12) {
                 AvatarView(name: message.sender.name.isEmpty ? message.sender.address : message.sender.name, size: 48)
@@ -304,19 +316,56 @@ private struct AttachmentCard: View {
 /// 本文パネルの上に並ぶボタンと検索欄 (見本の右上)。返信と全員に返信は 1 つのカプセルにまとめる。
 /// ボタンは T15 / T18 で動くようにする。いまは見た目だけ。
 private struct ReaderToolbar: View {
+    let model: InboxModel
     @Binding var searchText: String
 
     var body: some View {
+        let message = model.selectedMessage
         HStack(spacing: 10) {
             HStack(spacing: 0) {
-                ToolbarIcon(title: "返信", systemImage: "arrowshape.turn.up.left")
-                ToolbarIcon(title: "全員に返信", systemImage: "arrowshape.turn.up.left.2")
+                // 返信は T18 で作る
+                ToolbarIcon(title: "返信 (準備中)", systemImage: "arrowshape.turn.up.left", isEnabled: false) {}
+                ToolbarIcon(title: "全員に返信 (準備中)", systemImage: "arrowshape.turn.up.left.2", isEnabled: false) {}
             }
             .glassCapsule()
-            ToolbarIcon(title: "削除", systemImage: "trash").glassCapsule()
-            ToolbarIcon(title: "アーカイブ", systemImage: "archivebox").glassCapsule()
-            ToolbarIcon(title: "フラグ", systemImage: "flag").glassCapsule()
-            ToolbarIcon(title: "その他", systemImage: "ellipsis").glassCapsule()
+            ToolbarIcon(title: "削除", systemImage: "trash", isEnabled: model.canPerform(.moveToTrash, on: message)) {
+                Task { await model.perform(.moveToTrash) }
+            }
+            .glassCapsule()
+            ToolbarIcon(title: "アーカイブ", systemImage: "archivebox", isEnabled: model.canPerform(.archive, on: message)) {
+                Task { await model.perform(.archive) }
+            }
+            .glassCapsule()
+            ToolbarIcon(
+                title: message?.isStarred == true ? "スターを外す" : "スターを付ける",
+                systemImage: message?.isStarred == true ? "star.fill" : "star",
+                isEnabled: model.canPerform(message?.isStarred == true ? .unstar : .star, on: message)
+            ) {
+                Task { await model.perform(message?.isStarred == true ? .unstar : .star) }
+            }
+            .glassCapsule()
+            Menu {
+                Button("未読にする") { Task { await model.perform(.markUnread) } }
+                    .disabled(!model.canPerform(.markUnread, on: message))
+                Button("既読にする") { Task { await model.perform(.markRead) } }
+                    .disabled(!model.canPerform(.markRead, on: message))
+                Divider()
+                Button("迷惑メールにする") { Task { await model.perform(.markAsJunk) } }
+                    .disabled(!model.canPerform(.markAsJunk, on: message))
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(Palette.textPrimary)
+                    .frame(width: 44, height: 38)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .glassCapsule()
+            .help(Text("その他"))
+            .disabled(model.isShowingSamples || message == nil)
             Spacer(minLength: 16)
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
@@ -333,18 +382,22 @@ private struct ReaderToolbar: View {
 }
 
 private struct ToolbarIcon: View {
-    let title: LocalizedStringKey
+    let title: String
     let systemImage: String
+    var isEnabled = true
+    let action: () -> Void
 
     var body: some View {
-        Button {} label: {
+        Button(action: action) {
             Image(systemName: systemImage)
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(Palette.textPrimary)
+                .opacity(isEnabled ? 1 : 0.35)
                 .frame(width: 44, height: 38)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(!isEnabled)
         .help(Text(title))
         .accessibilityLabel(Text(title))
     }

@@ -60,6 +60,7 @@ import UniformTypeIdentifiers
         func unreadCount(in selection: MailboxSelection) async throws -> Int { try await base.unreadCount(in: selection) }
         func body(for id: MessageID) async throws -> MessageBody { throw MailRepositoryError.bodyUnavailable }
         func attachmentData(for id: MessageID, index: Int) async throws -> Data { throw MailRepositoryError.attachmentNotFound }
+        func perform(_ action: MessageAction, on id: MessageID) async throws { throw MailRepositoryError.actionUnavailable }
     }
 
     @Test func bodyFailureIsShownInsteadOfSpinningForever() async {

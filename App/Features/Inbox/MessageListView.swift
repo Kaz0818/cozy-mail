@@ -14,6 +14,8 @@ struct MessageListView: View {
                     systemImage: "sparkles",
                     text: "これは見本のメールです。左上の「＋」からアカウントを追加すると、本物のメールが表示されます。"
                 )
+            } else if let error = model.actionError {
+                Notice(systemImage: "exclamationmark.triangle.fill", text: error, isWarning: true)
             } else if let error = service.syncError {
                 Notice(systemImage: "exclamationmark.triangle.fill", text: "受信できなかったアカウントがあります。\n\(error)", isWarning: true)
             }
@@ -30,6 +32,7 @@ struct MessageListView: View {
                         ) {
                             Task { await model.selectMessage(message.id) }
                         }
+                        .contextMenu { MessageActionsMenu(model: model, message: message) }
                     }
                 }
             }
@@ -89,6 +92,33 @@ struct MessageListView: View {
             .help(Text("新規作成 (⌘N)"))
         }
         .padding(.horizontal, 6)
+    }
+}
+
+/// 行を右クリックしたときのメニュー。
+private struct MessageActionsMenu: View {
+    let model: InboxModel
+    let message: MessageSummary
+
+    var body: some View {
+        if message.isRead {
+            Button("未読にする") { Task { await model.perform(.markUnread, on: message.id) } }
+                .disabled(!model.canPerform(.markUnread, on: message))
+        } else {
+            Button("既読にする") { Task { await model.perform(.markRead, on: message.id) } }
+                .disabled(!model.canPerform(.markRead, on: message))
+        }
+        Button(message.isStarred ? "スターを外す" : "スターを付ける") {
+            Task { await model.perform(message.isStarred ? .unstar : .star, on: message.id) }
+        }
+        .disabled(!model.canPerform(message.isStarred ? .unstar : .star, on: message))
+        Divider()
+        Button("アーカイブ") { Task { await model.perform(.archive, on: message.id) } }
+            .disabled(!model.canPerform(.archive, on: message))
+        Button("削除") { Task { await model.perform(.moveToTrash, on: message.id) } }
+            .disabled(!model.canPerform(.moveToTrash, on: message))
+        Button("迷惑メールにする") { Task { await model.perform(.markAsJunk, on: message.id) } }
+            .disabled(!model.canPerform(.markAsJunk, on: message))
     }
 }
 

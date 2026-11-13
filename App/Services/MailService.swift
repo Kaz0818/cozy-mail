@@ -51,18 +51,8 @@ final class MailService {
         return LiveMailRepository(
             store: store,
             accounts: { try await directory.accounts() },
-            // 本文は開いたときにサーバーから取る。1 通ごとに接続し、取ったら閉じる
-            fetchMessage: { stored in
-                let session = try await directory.openSession(for: stored.summary.accountID)
-                do {
-                    let data = try await session.fetchMessage(in: stored.mailbox, uid: stored.uid)
-                    await session.close()
-                    return data
-                } catch {
-                    await session.close()
-                    throw error
-                }
-            }
+            // 本文の取得と整理の操作は、そのたびにサーバーにつなぎ、終わったら閉じる
+            openSession: { accountID in try await directory.openSession(for: accountID) }
         )
     }
 
