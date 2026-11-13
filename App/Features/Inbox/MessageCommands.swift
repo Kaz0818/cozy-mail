@@ -7,6 +7,7 @@ extension FocusedValues {
 }
 
 /// メニューバーの「ファイル」の新規作成と、「メッセージ」メニュー (SPEC US-8)。
+/// 新規メッセージ・返信・全員に返信・転送は、作成ウィンドウ (`ComposeWindow`) を開く。
 ///
 /// 1 文字だけのショートカット (`E` アーカイブ、`⌫` 削除、`↑` `↓` / `J` `K` 前後のメール、`S` スター) は、
 /// 文字を打っている欄で誤って動かないよう、メール一覧で受ける (`MessageListKeys`)。
@@ -17,10 +18,8 @@ struct MessageCommands: Commands {
 
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
-            // 作成ウィンドウは T18 で作る
-            Button("新規メッセージ") {}
+            Button("新規メッセージ") { openWindow(id: CozyMailApp.composeWindowID, value: ComposeRequest.new()) }
                 .keyboardShortcut("n")
-                .disabled(true)
             Button("新規ウィンドウ") { openWindow(id: CozyMailApp.mainWindowID) }
                 .keyboardShortcut("n", modifiers: [.command, .option])
         }
@@ -33,16 +32,15 @@ struct MessageCommands: Commands {
 
         CommandMenu("メッセージ") {
             let message = model?.selectedMessage
-            // 返信・転送は T18 で作る
-            Button("返信") {}
+            Button("返信") { compose(.reply) }
                 .keyboardShortcut("r")
-                .disabled(true)
-            Button("全員に返信") {}
+                .disabled(message == nil)
+            Button("全員に返信") { compose(.replyAll) }
                 .keyboardShortcut("r", modifiers: [.command, .shift])
-                .disabled(true)
-            Button("転送") {}
+                .disabled(message == nil)
+            Button("転送") { compose(.forward) }
                 .keyboardShortcut("f", modifiers: [.command, .shift])
-                .disabled(true)
+                .disabled(message == nil)
             Divider()
             Button("次のメール (↓ または J)") { run { await $0.selectNext() } }
                 .disabled(model?.messages.isEmpty ?? true)
@@ -66,6 +64,11 @@ struct MessageCommands: Commands {
                 .keyboardShortcut("j", modifiers: [.command, .shift])
                 .disabled(!can(.markAsJunk))
         }
+    }
+
+    private func compose(_ kind: ComposeRequest.Kind) {
+        guard let id = model?.selectedMessageID else { return }
+        openWindow(id: CozyMailApp.composeWindowID, value: ComposeRequest.replying(kind, to: id))
     }
 
     private func can(_ action: MessageAction) -> Bool {

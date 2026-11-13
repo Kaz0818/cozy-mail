@@ -5,7 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// 右の列: 件名、差出人、宛先、日時、本文、添付ファイル (見本の右の列)。
-/// 返信・削除などのボタンは T15 / T18 で動くようにする。
+/// 返信・転送のボタンは作成ウィンドウを開く (T18)。
 struct ReaderView: View {
     let model: InboxModel
     @State private var searchText = ""
@@ -319,14 +319,26 @@ private struct ReaderToolbar: View {
     let model: InboxModel
     @Binding var searchText: String
     @FocusState private var isSearchFocused: Bool
+    @Environment(\.openWindow) private var openWindow
+
+    private func compose(_ kind: ComposeRequest.Kind) {
+        guard let id = model.selectedMessageID else { return }
+        openWindow(id: CozyMailApp.composeWindowID, value: ComposeRequest.replying(kind, to: id))
+    }
 
     var body: some View {
         let message = model.selectedMessage
         HStack(spacing: 10) {
             HStack(spacing: 0) {
-                // 返信は T18 で作る
-                ToolbarIcon(title: "返信 (準備中)", systemImage: "arrowshape.turn.up.left", isEnabled: false) {}
-                ToolbarIcon(title: "全員に返信 (準備中)", systemImage: "arrowshape.turn.up.left.2", isEnabled: false) {}
+                ToolbarIcon(title: "返信", systemImage: "arrowshape.turn.up.left", isEnabled: message != nil) {
+                    compose(.reply)
+                }
+                ToolbarIcon(title: "全員に返信", systemImage: "arrowshape.turn.up.left.2", isEnabled: message != nil) {
+                    compose(.replyAll)
+                }
+                ToolbarIcon(title: "転送", systemImage: "arrowshape.turn.up.right", isEnabled: message != nil) {
+                    compose(.forward)
+                }
             }
             .glassCapsule()
             ToolbarIcon(title: "削除", systemImage: "trash", isEnabled: model.canPerform(.moveToTrash, on: message)) {

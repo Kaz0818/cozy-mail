@@ -116,6 +116,16 @@ import Testing
         #expect(parsed.invalid == ["bad-address"])
     }
 
+    /// 宛先の欄に入れた文字は、読み戻すと同じ宛先になる (名前に「,」があっても)。
+    @Test func formattedRecipientsReadBackTheSame() {
+        let contacts = [tanaka, Contact(name: "Suzuki, Ichiro", address: "suzuki@example.net"), suzuki]
+        let text = Composer.format(contacts)
+        #expect(text == "田中 健一 <k.tanaka@example.com>, \"Suzuki, Ichiro\" <suzuki@example.net>, suzuki@example.net")
+        // 同じアドレスは 1 つにまとめる
+        #expect(Composer.parseRecipients(text).contacts == [tanaka, Contact(name: "Suzuki, Ichiro", address: "suzuki@example.net")])
+        #expect(Composer.parseRecipients(Composer.format([tanaka, sato])).contacts == [tanaka, sato])
+    }
+
     @Test func addressValidation() {
         for good in ["a@b.co", "taro.yamada+news@example.co.jp"] {
             #expect(Composer.isValidAddress(good), "\(good)")

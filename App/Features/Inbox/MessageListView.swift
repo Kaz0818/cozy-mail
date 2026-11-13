@@ -5,6 +5,7 @@ import SwiftUI
 struct MessageListView: View {
     let model: InboxModel
     @Environment(MailService.self) private var service
+    @Environment(\.openWindow) private var openWindow
     @FocusState private var isListFocused: Bool
 
     var body: some View {
@@ -108,7 +109,7 @@ struct MessageListView: View {
             .accessibilityLabel(Text("新着メールを受信"))
             .help(Text("新着メールを受信 (⇧⌘N)"))
             Button {
-                // T18 で作成ウィンドウを開く
+                openWindow(id: CozyMailApp.composeWindowID, value: ComposeRequest.new())
             } label: {
                 Image(systemName: "square.and.pencil")
                     .font(.title3)
@@ -118,6 +119,7 @@ struct MessageListView: View {
             .foregroundStyle(Palette.onAccentFill)
             .glassCapsule(isProminent: true)
             .accessibilityLabel(Text("新規作成"))
+            .accessibilityIdentifier("compose.new")
             .help(Text("新規作成 (⌘N)"))
         }
         .padding(.horizontal, 6)

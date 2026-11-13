@@ -52,7 +52,9 @@ final class MailService {
             store: store,
             accounts: { try await directory.accounts() },
             // 本文の取得と整理の操作は、そのたびにサーバーにつなぎ、終わったら閉じる
-            openSession: { accountID in try await directory.openSession(for: accountID) }
+            openSession: { accountID in try await directory.openSession(for: accountID) },
+            // 送信も、そのたびに送信用のサーバーにつなぎ、送ったら閉じる
+            openSender: { accountID in try await directory.openSender(for: accountID) }
         )
     }
 

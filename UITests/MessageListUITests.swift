@@ -88,4 +88,38 @@ final class MessageListUITests: XCTestCase {
         }
         app.typeKey(.escape, modifierFlags: [])
     }
+
+    /// T18: ⌘N で作成ウィンドウが開く。見本のメールのときは、送ろうとするとアカウントの追加を案内する。
+    @MainActor
+    func testCommandNOpensANewMessageWindow() throws {
+        let app = launch()
+        _ = findRow("preview-1", in: app)
+        app.typeKey("n", modifierFlags: .command)
+
+        let to = app.textFields["compose.to"]
+        XCTAssertTrue(to.waitForExistence(timeout: 5), "作成ウィンドウが開かない")
+        to.click()
+        to.typeText("k.tanaka@example.com")
+        app.buttons["compose.send"].click()
+
+        let error = app.descendants(matching: .any)["compose.error"]
+        XCTAssertTrue(error.waitForExistence(timeout: 5), "送れないことが知らされない")
+    }
+
+    /// T18: メールを選んで ⌘R を押すと、件名に「Re: 」が付いた返信のウィンドウが開く。
+    @MainActor
+    func testCommandRRepliesToTheSelectedMessage() throws {
+        let app = launch()
+        findRow("preview-1", in: app).click()
+        XCTAssertTrue(app.staticTexts["<s.yamada@example.com>"].waitForExistence(timeout: 5))
+        app.typeKey("r", modifierFlags: .command)
+
+        let subject = app.textFields["compose.subject"]
+        XCTAssertTrue(subject.waitForExistence(timeout: 5), "返信のウィンドウが開かない")
+        let filled = NSPredicate(format: "value == %@", "Re: 企画のご提案について")
+        XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: filled, object: subject)], timeout: 5), .completed,
+                       "件名が「Re: 企画のご提案について」にならない: \(String(describing: subject.value))")
+        XCTAssertEqual(app.textFields["compose.to"].value as? String, "山田 さくら <s.yamada@example.com>")
+    }
 }
+

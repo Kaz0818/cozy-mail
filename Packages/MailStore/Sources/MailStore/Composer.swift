@@ -242,8 +242,14 @@ public enum Composer {
     // MARK: - アドレス
 
     /// 「山田 太郎 <taro@example.com>」の形の並び。
+    /// 名前に `,` `;` などが入っていれば `"..."` で囲む (宛先の欄に入れて、`parseRecipients` で読み戻せるように)。
     public static func format(_ contacts: [Contact]) -> String {
-        contacts.map { $0.name.isEmpty ? $0.address : "\($0.name) <\($0.address)>" }.joined(separator: ", ")
+        contacts.map { contact in
+            guard !contact.name.isEmpty else { return contact.address }
+            let needsQuotes = contact.name.contains { ",;、<>\"".contains($0) }
+            let name = needsQuotes ? "\"\(contact.name.replacingOccurrences(of: "\"", with: ""))\"" : contact.name
+            return "\(name) <\(contact.address)>"
+        }.joined(separator: ", ")
     }
 
     /// 宛先の欄に打った文字を、宛先の並びにする。`,` `;` 改行で区切り、`名前 <アドレス>` と `アドレス` を読む。

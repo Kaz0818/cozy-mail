@@ -4,6 +4,7 @@ import SwiftUI
 @main
 struct CozyMailApp: App {
     static let mainWindowID = "main"
+    static let composeWindowID = "compose"
 
     @AppStorage(AppTheme.storageKey) private var themeRawValue = AppTheme.system.rawValue
     /// 画面の自動テスト (`-ui-testing` で起動) では、本物のアカウントやキーチェーンに触れないよう、メモリ上だけで動かす。
@@ -31,6 +32,14 @@ struct CozyMailApp: App {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             }
         }
+
+        // 作成ウィンドウ (新規作成・返信・全員に返信・転送)。開くたびに別のウィンドウになる
+        WindowGroup("新規メッセージ", id: Self.composeWindowID, for: ComposeRequest.self) { $request in
+            ComposeWindow(request: request ?? .new())
+                .environment(service)
+        }
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 760, height: 640)
 
         Settings {
             TabView {
