@@ -1,0 +1,19 @@
+From: project-team@example.com
+To: me@example.com
+Subject: Weekly report
+Date: Thu, 12 Nov 2026 10:02:00 +0900
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-boundary"
+
+This is a multi-part message in MIME format.
+--alt-boundary
+Content-Type: text/plain; charset=utf-8
+
+今週の進捗レポートを共有します。
+--alt-boundary
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PGh0bWw+PGJvZHk+PHA+5LuK6YCx44GuPGI+6YCy5o2X44Os44Od44O844OIPC9iPuOCkuWFseac
+ieOBl+OBvuOBmeOAgjwvcD48L2JvZHk+PC9odG1sPg==
+--alt-boundary--

@@ -1,0 +1,30 @@
+From: s.yamada@example.com
+To: me@example.com
+Subject: with attachment
+Date: Thu, 12 Nov 2026 16:24:00 +0900
+MIME-Version: 1.0
+Content-Type: multipart/mixed;
+ boundary="mixed"
+
+--mixed
+Content-Type: multipart/alternative; boundary="alt"
+
+--alt
+Content-Type: text/plain; charset=utf-8
+
+本文です。
+--alt
+Content-Type: text/html; charset=utf-8
+
+<p>本文です。</p>
+--alt--
+
+--mixed
+Content-Type: application/pdf; name="report.pdf"
+Content-Disposition: attachment;
+ filename*=UTF-8''%E4%BC%81%E7%94%BB%E6%9B%B8%EF%BC%88%56%65%72%2E%32%EF%BC%89%2E%70%64%66
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQgZmFrZSBwZGYgYnl0ZXMgAAEC
+
+--mixed--

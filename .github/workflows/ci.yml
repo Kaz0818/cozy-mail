@@ -1,0 +1,47 @@
+name: CI
+
+# macOS の環境は無料時間を Linux の 10 倍の速さで使うので、PR では Linux だけを回す。
+# macOS のビルドは main に取り込んだときと、手動 (Actions の画面の「Run workflow」) のときだけ。
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  # Packages/ は Mac に依存しないことを確かめる (SPEC 12 章)
+  packages-linux:
+    name: Packages (Linux)
+    runs-on: ubuntu-24.04
+    container: swift:6.2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test MailCore
+        run: swift test --package-path Packages/MailCore
+      - name: Test MailStore
+        run: swift test --package-path Packages/MailStore
+      - name: Test AccountKit
+        run: swift test --package-path Packages/AccountKit
+
+  macos:
+    name: App (macOS)
+    if: github.event_name != 'pull_request'
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show toolchain
+        run: xcodebuild -version
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      # パッケージのテストは Linux で回している。ここでは Mac でだけ使うキーチェーンの部分がビルドできるかだけ確かめる
+      - name: Build Mac-only package targets
+        run: swift build --package-path Packages/AccountKit
+      - name: Generate Xcode project
+        run: xcodegen generate
+      - name: Build and test app
+        run: xcodebuild test -scheme CozyMail -destination 'platform=macOS' | tee xcodebuild.log
+        shell: bash -o pipefail {0}

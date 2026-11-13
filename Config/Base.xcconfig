@@ -1,0 +1,12 @@
+// 全員で共有する設定。個人の値 (チーム ID、バンドル ID) は Local.xcconfig に書く。
+
+// 既定は「Sign to Run Locally」(自分の Mac で動かすだけなら、Apple ID もチーム ID も要らない)
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+// 仮のバンドル ID。Local.xcconfig で自分の値に変える (一度決めたら変えない)
+COZYMAIL_BUNDLE_ID = com.example.cozymail
+
+// 個人の設定で上書きする (ファイルがなくてもよい)
+#include? "../Local.xcconfig"

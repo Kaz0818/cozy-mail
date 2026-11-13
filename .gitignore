@@ -1,0 +1,17 @@
+# Xcode (project.yml から生成する)
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+DerivedData/
+build/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/*/Package.resolved
+
+# 個人の設定
+Local.xcconfig
+
+# macOS
+.DS_Store

@@ -1,0 +1,19 @@
+From: news@example.com
+To: me@example.com
+Subject: inline image
+Date: Thu, 12 Nov 2026 16:24:00 +0900
+Content-Type: multipart/related; boundary="rel"
+
+--rel
+Content-Type: text/html; charset=utf-8
+
+<img src="cid:logo@example">
+--rel
+Content-Type: image/png
+Content-ID: <logo@example>
+Content-Disposition: inline
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgogZmFrZQ==
+
+--rel--
