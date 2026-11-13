@@ -55,6 +55,10 @@ public protocol MessageStore: Sendable {
     func inboxUnreadCount(account: AccountID) async throws -> Int?
     func setInboxUnreadCount(_ count: Int, account: AccountID) async throws
     func allSummaries() async throws -> [MessageSummary]
+    func message(id: MessageID) async throws -> StoredMessage?
+    /// 取得したメール全体の生データ (本文と添付)。まだ取っていなければ nil。
+    func rawMessage(for id: MessageID) async throws -> Data?
+    func setRawMessage(_ data: Data, for id: MessageID) async throws
 }
 
 /// テストと SwiftUI プレビュー用。アプリを終了すると消える。
@@ -67,6 +71,7 @@ public actor InMemoryMessageStore: MessageStore {
     private var states: [FolderKey: MailboxSyncState] = [:]
     private var stored: [MessageID: StoredMessage] = [:]
     private var inboxUnread: [AccountID: Int] = [:]
+    private var raw: [MessageID: Data] = [:]
 
     public init() {}
 
@@ -87,18 +92,16 @@ public actor InMemoryMessageStore: MessageStore {
     }
 
     public func delete(account: AccountID, mailbox: String, uids: Set<UInt32>) {
-        stored = stored.filter { _, message in
-            !(message.summary.accountID == account && message.mailbox == mailbox && uids.contains(message.uid))
-        }
+        removeMessages { $0.summary.accountID == account && $0.mailbox == mailbox && uids.contains($0.uid) }
     }
 
     public func deleteAll(account: AccountID, mailbox: String) {
-        stored = stored.filter { _, message in !(message.summary.accountID == account && message.mailbox == mailbox) }
+        removeMessages { $0.summary.accountID == account && $0.mailbox == mailbox }
         states[FolderKey(account: account, mailbox: mailbox)] = nil
     }
 
     public func deleteAccount(_ account: AccountID) {
-        stored = stored.filter { _, message in message.summary.accountID != account }
+        removeMessages { $0.summary.accountID == account }
         states = states.filter { key, _ in key.account != account }
         inboxUnread[account] = nil
     }
@@ -113,5 +116,25 @@ public actor InMemoryMessageStore: MessageStore {
 
     public func allSummaries() -> [MessageSummary] {
         stored.values.map(\.summary)
+    }
+
+    public func message(id: MessageID) -> StoredMessage? {
+        stored[id]
+    }
+
+    public func rawMessage(for id: MessageID) -> Data? {
+        raw[id]
+    }
+
+    public func setRawMessage(_ data: Data, for id: MessageID) {
+        raw[id] = data
+    }
+
+    /// メールと、その生データをまとめて消す。
+    private func removeMessages(where shouldRemove: (StoredMessage) -> Bool) {
+        for (id, message) in stored where shouldRemove(message) {
+            stored[id] = nil
+            raw[id] = nil
+        }
     }
 }

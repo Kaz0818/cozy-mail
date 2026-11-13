@@ -1,3 +1,5 @@
+import Foundation
+
 /// 画面がメールを取りに行く窓口。
 /// 画面はこのプロトコルだけを使い、仮データ (`PreviewMailRepository`) と本物の同期処理を差し替えられるようにする。
 public protocol MailRepository: Sendable {
@@ -5,11 +7,17 @@ public protocol MailRepository: Sendable {
     /// 新しい順に並べて返す。
     func messages(in selection: MailboxSelection, filter: MessageFilter) async throws -> [MessageSummary]
     func unreadCount(in selection: MailboxSelection) async throws -> Int
+    /// 本文。必要ならサーバーから取る。
     func body(for id: MessageID) async throws -> MessageBody
+    /// 添付ファイルの中身 (`Attachment.index` で指定)。
+    func attachmentData(for id: MessageID, index: Int) async throws -> Data
 }
 
 public enum MailRepositoryError: Error, Equatable {
     case messageNotFound(MessageID)
+    /// 本文を取る方法がない (サーバーにつながっていない)。
+    case bodyUnavailable
+    case attachmentNotFound
 }
 
 extension MailboxSelection {

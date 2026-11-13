@@ -3,6 +3,24 @@ import Testing
 @testable import MailStore
 
 /// 保存したメールを画面に渡す窓口。仮データ (`PreviewMailRepository`) と同じ約束を守る。
+/// 本文の取得を記録し、決まった生データを返す。
+final class BodyFetcherSpy: @unchecked Sendable {
+    private let lock = NSLock()
+    private let raw: String
+    private(set) var requests: [StoredMessage] = []
+
+    init(raw: String) {
+        self.raw = raw
+    }
+
+    var fetch: @Sendable (StoredMessage) async throws -> Data {
+        { [self] message in
+            lock.withLock { requests.append(message) }
+            return Data(raw.utf8)
+        }
+    }
+}
+
 @Suite struct LiveMailRepositoryTests {
     private let work = Account(id: AccountID("work"), provider: .gmail, emailAddress: "w@gmail.com", displayName: "Gmail (仕事)")
     private let yahoo = Account(id: AccountID("yahoo"), provider: .yahoo, emailAddress: "y@yahoo.example", displayName: "Yahoo!")
@@ -18,7 +36,7 @@ import Testing
                 isRead: isRead, isStarred: isStarred
             ),
             mailbox: "INBOX",
-            uid: UInt32(abs(id.hashValue) % 100_000)
+            uid: UInt32(id.unicodeScalars.reduce(0) { $0 + $1.value })
         )
     }
 
@@ -78,14 +96,69 @@ import Testing
         #expect(try await repository.unreadCount(in: .unified(.sent)) == 0)
     }
 
-    @Test func bodyIsAPlaceholderUntilBodiesAreFetched() async throws {
+    @Test func bodyIsFetchedOnceThenServedFromTheStore() async throws {
+        let store = InMemoryMessageStore()
+        let stored = message("w1", account: work.id, mailbox: .inbox, minutesAgo: 10)
+        try await store.upsert([stored])
+        let fetcher = BodyFetcherSpy(raw: "Subject: x\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n本文の一行目\r\n二行目\r\n")
+        let accounts = [work]
+        let repository = LiveMailRepository(store: store, accounts: { accounts }, fetchMessage: fetcher.fetch)
+
+        let first = try await repository.body(for: MessageID("w1"))
+        let second = try await repository.body(for: MessageID("w1"))
+
+        #expect(first.text == "本文の一行目\n二行目\n")
+        #expect(second == first)
+        #expect(fetcher.requests.map(\.uid) == [stored.uid])
+        // 本文を取ったら、一覧の書き出しも埋まる
+        let listed = try await repository.messages(in: .unified(.inbox), filter: .all)
+        #expect(listed.first?.preview == "本文の一行目 二行目")
+    }
+
+    @Test func fetchFailureIsReported() async throws {
+        let store = InMemoryMessageStore()
+        try await store.upsert([message("w1", account: work.id, mailbox: .inbox, minutesAgo: 10)])
+        let accounts = [work]
+        let repository = LiveMailRepository(store: store, accounts: { accounts }, fetchMessage: { _ in throw FakeServerError.noSuchMailbox("x") })
+        await #expect(throws: FakeServerError.self) { _ = try await repository.body(for: MessageID("w1")) }
+        #expect(try await store.rawMessage(for: MessageID("w1")) == nil)
+    }
+
+    @Test func unknownMessageThrowsNotFound() async throws {
         let (repository, _) = try await repository()
-        let body = try await repository.body(for: MessageID("w1"))
-        #expect(body.messageID == MessageID("w1"))
-        #expect(!body.text.isEmpty)
         await #expect(throws: MailRepositoryError.messageNotFound(MessageID("nope"))) {
             _ = try await repository.body(for: MessageID("nope"))
         }
+    }
+
+    @Test func attachmentDataUsesTheSavedMessage() async throws {
+        let store = InMemoryMessageStore()
+        try await store.upsert([message("w1", account: work.id, mailbox: .inbox, minutesAgo: 10)])
+        let fetcher = BodyFetcherSpy(raw: """
+        Content-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nhi\r\n--b\r\n\
+        Content-Type: text/csv; name=a.csv\r\nContent-Disposition: attachment; filename=a.csv\r\n\r\nx,y\r\n--b--\r\n
+        """)
+        let accounts = [work]
+        let repository = LiveMailRepository(store: store, accounts: { accounts }, fetchMessage: fetcher.fetch)
+
+        let body = try await repository.body(for: MessageID("w1"))
+        let attachment = try #require(body.attachments.first)
+        let data = try await repository.attachmentData(for: MessageID("w1"), index: attachment.index)
+
+        #expect(attachment.filename == "a.csv")
+        #expect(data == Data("x,y".utf8))
+        #expect(fetcher.requests.count == 1)
+    }
+
+    @Test func removingMessagesAlsoRemovesTheirSavedBodies() async throws {
+        let store = InMemoryMessageStore()
+        let stored = message("w1", account: work.id, mailbox: .inbox, minutesAgo: 10)
+        try await store.upsert([stored])
+        try await store.setRawMessage(Data("x".utf8), for: stored.summary.id)
+
+        try await store.delete(account: work.id, mailbox: stored.mailbox, uids: [stored.uid])
+
+        #expect(try await store.rawMessage(for: stored.summary.id) == nil)
     }
 
     @Test func removedAccountsMessagesAreHidden() async throws {

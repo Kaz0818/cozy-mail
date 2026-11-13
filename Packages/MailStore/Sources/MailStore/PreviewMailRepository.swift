@@ -32,6 +32,14 @@ public struct PreviewMailRepository: MailRepository {
         }
         return MessageBody(messageID: id, to: [Contact(name: "自分", address: "me@example.com")], text: summary.preview)
     }
+
+    /// 見本なので、添付ファイルの中身は説明の文だけ。
+    public func attachmentData(for id: MessageID, index: Int) async throws -> Data {
+        guard let attachment = bodies[id]?.attachments.first(where: { $0.index == index }) else {
+            throw MailRepositoryError.attachmentNotFound
+        }
+        return Data("これは見本の添付ファイル「\(attachment.filename)」です。".utf8)
+    }
 }
 
 /// 仮データの中身。件数は見本の未読数 (仕事 12、プライベート 3、副業 0、Yahoo! 7、合計 22) に合わせてある。

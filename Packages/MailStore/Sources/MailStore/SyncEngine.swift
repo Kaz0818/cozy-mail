@@ -11,6 +11,8 @@ public protocol MailServerSession: Sendable {
     func fetchFlags(in mailbox: String, uids: ClosedRange<UInt32>, includeGmailAttributes: Bool) async throws -> [IMAPFetchedHeader]
     /// フォルダ全体の未読数 (`STATUS (UNSEEN)`)。
     func unreadCount(of mailbox: String) async throws -> Int
+    /// メール 1 通の全体。既読にはしない。
+    func fetchMessage(in mailbox: String, uid: UInt32) async throws -> Data
     /// ログアウトして接続を閉じる。
     func close() async
 }

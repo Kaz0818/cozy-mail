@@ -99,6 +99,14 @@ actor FakeMailServer: MailServerSession {
         return result.map { header($0, gmail: includeGmailAttributes) }
     }
 
+    func fetchMessage(in mailbox: String, uid: UInt32) async throws -> Data {
+        calls.append("BODY \(mailbox) \(uid)")
+        guard let message = try folder(mailbox).messages.first(where: { $0.uid == uid }) else {
+            throw FakeServerError.noSuchMailbox("\(mailbox) uid \(uid)")
+        }
+        return Data("Subject: \(message.subject)\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nbody \(uid)\r\n".utf8)
+    }
+
     func close() async {
         calls.append("CLOSE")
     }
