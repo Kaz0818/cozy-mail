@@ -9,6 +9,7 @@ struct AddAccountSheet: View {
     @State private var email = ""
     @State private var password = ""
     @State private var displayName = ""
+    @State private var senderName = ""
     @State private var choice: ProviderChoice = .automatic
     @State private var isWorking = false
     @State private var errorMessage: String?
@@ -25,6 +26,9 @@ struct AddAccountSheet: View {
                 SecureField("アプリパスワード", text: $password)
                     .textContentType(.password)
                 TextField("表示名", text: $displayName, prompt: Text("例: Gmail (仕事)"))
+                    .help(Text("この Mac でアカウントを見分けるための名前です。相手には見えません。"))
+                TextField("差出人の名前", text: $senderName, prompt: Text("例: 山田 太郎"))
+                    .help(Text("送ったメールで、相手に見える名前です。空にすると、メールアドレスだけになります。"))
                 Picker("メールの種類", selection: $choice) {
                     Text("自動で判定").tag(ProviderChoice.automatic)
                     Text("Gmail (Google Workspace を含む)").tag(ProviderChoice.gmail)
@@ -72,7 +76,9 @@ struct AddAccountSheet: View {
         isWorking = true
         errorMessage = nil
         do {
-            try await service.addAccount(email: email, password: password, displayName: displayName, choice: choice)
+            try await service.addAccount(
+                email: email, password: password, displayName: displayName, senderName: senderName, choice: choice
+            )
             dismiss()
         } catch {
             errorMessage = error.userMessage

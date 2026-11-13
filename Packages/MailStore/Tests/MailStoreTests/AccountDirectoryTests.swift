@@ -278,6 +278,22 @@ private final class IDCounter: @unchecked Sendable {
         await #expect(throws: AccountError.notFound) { _ = try await directory.openSession(for: account.id) }
     }
 
+    /// 差出人の名前は、追加するときに入れられ、あとから変えられて、開き直しても残る。
+    @Test func senderNameIsSavedAndCanBeChanged() async throws {
+        let spy = ConnectorSpy()
+        let storage = InMemoryAccountListStorage()
+        let directory = makeDirectory(spy, storage: storage)
+        let account = try await directory.add(
+            email: "me@gmail.com", password: "abcd efgh", displayName: "Gmail (仕事)", senderName: " 山田 太郎 ", choice: .automatic
+        )
+        #expect(account.senderName == "山田 太郎")
+
+        try await directory.setSenderName("Taro Yamada", for: account.id)
+        let reopened = makeDirectory(ConnectorSpy(), storage: storage)
+        #expect(try await reopened.accounts().first?.senderName == "Taro Yamada")
+        await #expect(throws: AccountError.notFound) { try await directory.setSenderName("x", for: AccountID("none")) }
+    }
+
     @Test func openingASessionUsesTheSavedPassword() async throws {
         let spy = ConnectorSpy()
         let directory = makeDirectory(spy)

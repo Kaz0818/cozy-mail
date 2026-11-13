@@ -197,10 +197,11 @@ struct MessageRow: View {
                 .fill(message.isRead ? Color.clear : Palette.accent)
                 .frame(width: 8, height: 8)
                 .padding(.top, 16)
-            AvatarView(name: message.sender.name)
+            // 送信済み・下書きは宛先、それ以外は差出人。名前がなければアドレス (「?」にしない)
+            AvatarView(name: message.listContacts.first?.displayName ?? "")
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(message.sender.name)
+                    Text(message.listTitle)
                         .font(.body.weight(message.isRead ? .medium : .bold))
                         .foregroundStyle(primaryText)
                         .lineLimit(1)

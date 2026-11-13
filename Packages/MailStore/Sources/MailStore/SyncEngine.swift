@@ -230,6 +230,7 @@ public struct SyncEngine: Sendable {
             accountID: account,
             mailbox: role(for: header, target: target),
             sender: Contact(name: from?.name ?? "", address: from?.address ?? ""),
+            recipients: ((parsed?.to ?? []) + (parsed?.cc ?? [])).map { Contact(name: $0.name, address: $0.address) },
             subject: parsed?.subject ?? "",
             preview: "",
             date: parsed?.date ?? Date(timeIntervalSince1970: 0),

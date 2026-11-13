@@ -152,6 +152,21 @@ private actor FakeSender: MailSendingSession {
         #expect(await sender.sent.count == 1)
     }
 
+    /// 差出人の名前を決めていれば、相手には「山田 太郎 <me@...>」と見える。
+    @Test func senderNameIsUsedInFrom() async throws {
+        let server = await server()
+        let sender = FakeSender()
+        var named = yahoo
+        named.senderName = "山田 太郎"
+        let (repository, _) = try await repository(account: named, server: server, sender: sender)
+
+        _ = try await repository.send(draft(named))
+
+        let sent = try #require(await sender.sent.first)
+        #expect(try MIMEParser.parse(sent.data).from == [EmailAddress(name: "山田 太郎", address: "me@yahoo.example")])
+        #expect(sent.from == "me@yahoo.example")
+    }
+
     @Test func sendingFromAnUnknownAccountIsRefused() async throws {
         let server = await server()
         let (repository, _) = try await repository(account: yahoo, server: server, sender: FakeSender())

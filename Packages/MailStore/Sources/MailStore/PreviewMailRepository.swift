@@ -191,7 +191,8 @@ private final class PreviewData {
 
     private func addDrafts(account: AccountID) {
         let me = Contact(name: "自分", address: "work@example.com")
-        add(account: account, mailbox: .drafts, sender: me, subject: "Re: 企画のご提案について",
+        add(account: account, mailbox: .drafts, sender: me,
+            recipients: [Contact(name: "山田 さくら", address: "s.yamada@example.com")], subject: "Re: 企画のご提案について",
             preview: "山田さん、資料ありがとうございます。", date: today(9, 30), isRead: true)
         add(account: account, mailbox: .drafts, sender: me, subject: "来週の出張について",
             preview: "（下書き）", date: daysAgo(2, hour: 20), isRead: true)
@@ -204,6 +205,7 @@ private final class PreviewData {
         account: AccountID,
         mailbox: MailboxRole = .inbox,
         sender: Contact,
+        recipients: [Contact] = [],
         subject: String,
         preview: String,
         date: Date,
@@ -214,7 +216,7 @@ private final class PreviewData {
         nextID += 1
         let id = MessageID("preview-\(nextID)")
         messages.append(MessageSummary(
-            id: id, accountID: account, mailbox: mailbox, sender: sender, subject: subject, preview: preview,
+            id: id, accountID: account, mailbox: mailbox, sender: sender, recipients: recipients, subject: subject, preview: preview,
             date: date, isRead: isRead, isStarred: isStarred, hasAttachments: hasAttachments
         ))
         return id

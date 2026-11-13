@@ -95,10 +95,20 @@ final class MailService {
     }
 
     /// ログインを確かめてから追加し、そのアカウントを同期する。
-    func addAccount(email: String, password: String, displayName: String, choice: ProviderChoice) async throws(AccountError) {
-        _ = try await directory.add(email: email, password: password, displayName: displayName, choice: choice)
+    func addAccount(
+        email: String, password: String, displayName: String, senderName: String, choice: ProviderChoice
+    ) async throws(AccountError) {
+        _ = try await directory.add(
+            email: email, password: password, displayName: displayName, senderName: senderName, choice: choice
+        )
         await reloadAccounts()
         await syncAll()
+    }
+
+    /// 差出人の名前 (送ったメールで相手に見える名前) を変える。
+    func setSenderName(_ name: String, for id: AccountID) async throws(AccountError) {
+        try await directory.setSenderName(name, for: id)
+        await reloadAccounts()
     }
 
     /// アカウントを削除する。パスワードと、保存していたメールも消える。

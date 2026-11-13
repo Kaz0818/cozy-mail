@@ -208,7 +208,8 @@ public struct LiveMailRepository: MailRepository {
             throw DraftProblem.noAccount
         }
 
-        let from = EmailAddress(name: "", address: account.emailAddress)
+        // 差出人の名前 (設定で決めたもの)。空ならアドレスだけ
+        let from = EmailAddress(name: account.senderName, address: account.emailAddress)
         let address = { (contacts: [Contact]) in contacts.map { EmailAddress(name: $0.name, address: $0.address) } }
         let message = OutgoingMessage(
             from: from,

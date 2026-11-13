@@ -14,6 +14,8 @@ actor FakeMailServer: MailServerSession {
         var gmailMessageID: UInt64?
         var labels: [String] = []
         var contentType = "text/plain; charset=utf-8"
+        /// 宛先 (To)。空なら書かない。
+        var to = ""
     }
 
     struct Folder {
@@ -207,7 +209,8 @@ actor FakeMailServer: MailServerSession {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "UTC")
         formatter.dateFormat = "EEE, d MMM yyyy HH:mm:ss Z"
-        let raw = "From: \(message.from)\r\nSubject: \(message.subject)\r\nDate: \(formatter.string(from: message.date))\r\n"
+        let raw = "From: \(message.from)\r\n" + (message.to.isEmpty ? "" : "To: \(message.to)\r\n")
+            + "Subject: \(message.subject)\r\nDate: \(formatter.string(from: message.date))\r\n"
             + "Message-ID: <\(message.uid)@example.com>\r\nContent-Type: \(message.contentType)\r\n\r\n"
         return IMAPFetchedHeader(
             uid: message.uid,
