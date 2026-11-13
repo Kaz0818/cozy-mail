@@ -94,7 +94,8 @@ private final class ClosureMenuItem: NSMenuItem {
         fatalError("init(coder:) is not supported")
     }
 
-    @objc private func fire() {
+    /// メニューの項目は、いつもメインスレッドで選ばれる。
+    @MainActor @objc private func fire() {
         handler()
     }
 }
