@@ -9,7 +9,8 @@ let package = Package(
         .executable(name: "cozymail-probe", targets: ["cozymail-probe"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-nio-imap.git", from: "0.4.0"),
+        // 0.x は minor の更新で API が変わる (0.5.0 で破壊的変更あり) ので、0.4.x に固定する。上げるときは別の作業として行う
+        .package(url: "https://github.com/apple/swift-nio-imap.git", .upToNextMinor(from: "0.4.0")),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.80.0"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.29.0"),
         // 確認用ツールの Gmail ログインだけで使う (MailCore 本体は AccountKit に依存しない)

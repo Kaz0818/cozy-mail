@@ -5,10 +5,9 @@ xcuserdata/
 DerivedData/
 build/
 
-# Swift Package Manager
+# Swift Package Manager (Package.resolved は版をそろえるためにコミットする)
 .build/
 .swiftpm/
-Packages/*/Package.resolved
 
 # 個人の設定
 Local.xcconfig
