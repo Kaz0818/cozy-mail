@@ -99,6 +99,8 @@ private struct ComposeForm: View {
         .onChange(of: model.outcome) { _, outcome in
             if outcome == .sent { onFinished() }
         }
+        // メニューバーの「メッセージ > 送信」(⌘↩) が、このウィンドウを送るように
+        .focusedSceneValue(\.composeModel, model)
     }
 
     private var isSentButNotSaved: Bool {
@@ -141,7 +143,14 @@ private struct ComposeForm: View {
                         if model.isSending {
                             ProgressView().controlSize(.small)
                         } else {
-                            Label("送信", systemImage: "paperplane.fill")
+                            HStack(spacing: 8) {
+                                Label("送信", systemImage: "paperplane.fill")
+                                // ショートカットを小さく添える
+                                Text("⌘↩")
+                                    .font(.caption.weight(.medium))
+                                    .opacity(0.75)
+                                    .accessibilityHidden(true)
+                            }
                         }
                     }
                     .font(.body.weight(.semibold))

@@ -5,6 +5,7 @@ import Security
 
 /// macOS のキーチェーンに保存する。この Mac だけに置き、iCloud には同期しない。
 /// アプリを作り直すたびに「キーチェーンを使おうとしています」と聞かれることがある (署名が変わるため)。「常に許可」を選ぶ。
+/// 無料の Apple ID で署名すると、作り直しても聞かれなくなる (docs/signing.md)。
 public struct KeychainSecretStore: SecretStore {
     private let service: String
 

@@ -143,6 +143,9 @@ public actor AccountDirectory {
     private let connector: Connector
     private let senderConnector: SenderConnector
     private let makeID: @Sendable () -> String
+    /// 一度キーチェーンから読んだパスワード (アプリを閉じるまでメモリにだけ置く)。
+    /// 受信・本文・送信のたびにキーチェーンを読むと、そのたびに「キーチェーンを使おうとしています」と聞かれるため。
+    private var passwordCache: [AccountID: String] = [:]
 
     public init(
         storage: any AccountListStorage,
@@ -212,6 +215,7 @@ public actor AccountDirectory {
         list.append(MailAccountSettings(account: account, imap: resolved.imap, smtp: resolved.smtp))
         do {
             try secrets.set(Data(password.utf8), for: Self.passwordKey(account.id))
+            passwordCache[account.id] = password
             try save(list)
         } catch {
             try? secrets.set(nil, for: Self.passwordKey(account.id))
@@ -224,6 +228,7 @@ public actor AccountDirectory {
     public func remove(_ id: AccountID, messages: any MessageStore) async throws {
         let list = try loadSettings().filter { $0.account.id != id }
         try save(list)
+        passwordCache[id] = nil
         try secrets.set(nil, for: Self.passwordKey(id))
         try await messages.deleteAccount(id)
     }
@@ -242,8 +247,18 @@ public actor AccountDirectory {
 
     private func savedCredentials(for id: AccountID) throws -> (MailAccountSettings, MailCredentials) {
         guard let settings = try settings(for: id) else { throw AccountError.notFound }
-        guard let data = try secrets.data(for: Self.passwordKey(id)) else { throw AccountError.wrongPassword("パスワードが保存されていません") }
-        return (settings, .password(username: settings.account.emailAddress, password: String(decoding: data, as: UTF8.self)))
+        return (settings, .password(username: settings.account.emailAddress, password: try password(for: id)))
+    }
+
+    /// パスワード。キーチェーンを読むのは、アプリを開いてからアカウントごとに 1 回だけ。
+    private func password(for id: AccountID) throws -> String {
+        if let cached = passwordCache[id] { return cached }
+        guard let data = try secrets.data(for: Self.passwordKey(id)) else {
+            throw AccountError.wrongPassword("パスワードが保存されていません")
+        }
+        let password = String(decoding: data, as: UTF8.self)
+        passwordCache[id] = password
+        return password
     }
 
     // MARK: - 部品

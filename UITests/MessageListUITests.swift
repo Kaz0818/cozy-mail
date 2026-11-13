@@ -89,7 +89,7 @@ final class MessageListUITests: XCTestCase {
         app.typeKey(.escape, modifierFlags: [])
     }
 
-    /// T18: ⌘N で作成ウィンドウが開く。見本のメールのときは、送ろうとするとアカウントの追加を案内する。
+    /// T18: ⌘N で作成ウィンドウが開き、⌘↩ で送る。見本のメールのときは、送ろうとするとアカウントの追加を案内する。
     @MainActor
     func testCommandNOpensANewMessageWindow() throws {
         let app = launch()
@@ -100,7 +100,9 @@ final class MessageListUITests: XCTestCase {
         XCTAssertTrue(to.waitForExistence(timeout: 5), "作成ウィンドウが開かない")
         to.click()
         to.typeText("k.tanaka@example.com")
-        app.buttons["compose.send"].click()
+        XCTAssertTrue(app.menuItems["送信"].exists, "メニューに「送信」がない")
+        // ⌘↩ で送る (メニューの「メッセージ > 送信」)
+        app.typeKey(.return, modifierFlags: .command)
 
         let error = app.descendants(matching: .any)["compose.error"]
         XCTAssertTrue(error.waitForExistence(timeout: 5), "送れないことが知らされない")

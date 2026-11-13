@@ -4,6 +4,8 @@ import SwiftUI
 extension FocusedValues {
     /// いま前に出ているメインウィンドウの受信トレイ。メニューの項目はこれに対して動く。
     @Entry var inboxModel: InboxModel?
+    /// いま前に出ている作成ウィンドウ。メニューの「送信」(⌘↩) はこれを送る。
+    @Entry var composeModel: ComposeModel?
 }
 
 /// メニューバーの「ファイル」の新規作成と、「メッセージ」メニュー (SPEC US-8)。
@@ -14,6 +16,7 @@ extension FocusedValues {
 /// メニューには、どこからでも使える `⌘` 付きのショートカットを付ける。
 struct MessageCommands: Commands {
     @FocusedValue(\.inboxModel) private var model
+    @FocusedValue(\.composeModel) private var compose
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
@@ -32,6 +35,14 @@ struct MessageCommands: Commands {
 
         CommandMenu("メッセージ") {
             let message = model?.selectedMessage
+            // 作成ウィンドウが前にあるときだけ押せる
+            Button("送信") {
+                guard let compose else { return }
+                Task { await compose.send() }
+            }
+            .keyboardShortcut(.return, modifiers: .command)
+            .disabled(!(compose?.canSend ?? false))
+            Divider()
             Button("返信") { compose(.reply) }
                 .keyboardShortcut("r")
                 .disabled(message == nil)
