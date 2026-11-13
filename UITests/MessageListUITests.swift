@@ -12,6 +12,12 @@ final class MessageListUITests: XCTestCase {
         // 見本のメールで、前回のウィンドウ状態を使わずに起動する
         app.launchArguments += ["-ui-testing", "-ApplePersistenceIgnoreState", "YES"]
         app.launch()
+        // CI の Mac では、起動してもウィンドウが開かないことがある (2026-11-13 の CI で確認)。
+        // そのときは「ファイル > 新規ウィンドウ」(⌘N) で開く
+        if !app.windows.firstMatch.waitForExistence(timeout: 5) {
+            app.typeKey("n", modifierFlags: .command)
+            XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "ウィンドウが開かない")
+        }
         return app
     }
 
