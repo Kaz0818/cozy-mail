@@ -48,7 +48,12 @@ final class MailService {
     var repository: any MailRepository {
         guard !accounts.isEmpty else { return PreviewMailRepository() }
         let directory = directory
-        return LiveMailRepository(store: store, accounts: { try await directory.accounts() })
+        return LiveMailRepository(
+            store: store,
+            accounts: { try await directory.accounts() },
+            // 本文の取得と整理の操作は、そのたびにサーバーにつなぎ、終わったら閉じる
+            openSession: { accountID in try await directory.openSession(for: accountID) }
+        )
     }
 
     var isShowingSamples: Bool {

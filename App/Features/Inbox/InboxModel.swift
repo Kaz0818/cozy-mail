@@ -26,6 +26,10 @@ final class InboxModel {
     private(set) var filter: MessageFilter = .all
     private(set) var selectedMessageID: MessageID?
     private(set) var selectedBody: MessageBody?
+    /// 本文を取れなかったときの説明。取れたら nil。
+    private(set) var bodyError: String?
+    /// 整理の操作 (既読・アーカイブなど) が失敗したときの説明。次の操作で消える。
+    private(set) var actionError: String?
     private(set) var errorMessage: String?
     /// アカウントがまだ 1 つもなく、見本のメールを出しているとき。
     private(set) var isShowingSamples = false
@@ -54,6 +58,12 @@ final class InboxModel {
     // MARK: - 読み込み
 
     func load() async {
+        await refreshCounts()
+        await reloadMessages()
+    }
+
+    /// アカウント・フォルダの未読数だけを読み直す (一覧と選択はそのまま)。
+    private func refreshCounts() async {
         do {
             var items: [AccountItem] = []
             for account in try await repository.accounts() {
@@ -69,7 +79,6 @@ final class InboxModel {
             }
             folders = folderItems
             unifiedUnreadCount = try await repository.unreadCount(in: .unified(.inbox))
-            await reloadMessages()
         } catch {
             errorMessage = String(describing: error)
         }
@@ -90,12 +99,119 @@ final class InboxModel {
     func selectMessage(_ id: MessageID?) async {
         selectedMessageID = id
         selectedBody = nil
+        bodyError = nil
         guard let id else { return }
         do {
             let body = try await repository.body(for: id)
-            if selectedMessageID == id { selectedBody = body }
+            guard selectedMessageID == id else { return }
+            selectedBody = body
+            await markReadOnOpen(id)
+            // 初めて本文を取ったメールは、一覧の書き出し (2 行目) が埋まる。その書き出しだけを写す。
+            // 一覧そのものは入れ替えない (「未読」で絞っているとき、既読にしたばかりのメールが消えてしまうため)
+            if let refreshed = try? await repository.messages(in: selection, filter: filter), selectedMessageID == id,
+               let fresh = refreshed.first(where: { $0.id == id }) {
+                patch(id) { $0.preview = fresh.preview }
+            }
         } catch {
-            errorMessage = String(describing: error)
+            if selectedMessageID == id { bodyError = Self.describe(error, doing: "本文を取得") }
+        }
+    }
+
+    // MARK: - 整理の操作
+
+    /// 開いたメールを既読にする。
+    /// 一覧は読み直さず、その行と未読数だけを変える (「未読」で絞っているとき、読み直すと次のメールが選ばれ、
+    /// それも既読になり…と続いてしまうため)。
+    private func markReadOnOpen(_ id: MessageID) async {
+        guard !isShowingSamples, let message = messages.first(where: { $0.id == id }), !message.isRead else { return }
+        do {
+            try await repository.perform(.markRead, on: id)
+            patch(id) { $0.isRead = true }
+            await refreshCounts()
+        } catch {
+            actionError = Self.describe(error, doing: "既読に")
+        }
+    }
+
+    /// 既読・スター・アーカイブ・削除・迷惑メール。
+    /// フラグの変更は、その行だけを変える。移動 (アーカイブ・削除・迷惑メール) は一覧を読み直す
+    /// (選んでいたメールが消えたら、先頭のメールを選ぶ)。
+    func perform(_ action: MessageAction, on id: MessageID? = nil) async {
+        guard !isShowingSamples, let id = id ?? selectedMessageID else { return }
+        actionError = nil
+        do {
+            try await repository.perform(action, on: id)
+            switch action {
+            case .markRead: patch(id) { $0.isRead = true }
+            case .markUnread: patch(id) { $0.isRead = false }
+            case .star: patch(id) { $0.isStarred = true; $0.isFlagged = true }
+            case .unstar: patch(id) { $0.isStarred = false; $0.isFlagged = false }
+            case .archive, .moveToTrash, .markAsJunk: await reloadMessages()
+            }
+            await refreshCounts()
+        } catch {
+            actionError = Self.describe(error, doing: Self.actionName(action))
+        }
+    }
+
+    /// その操作が、いまのメールにできるか (できないボタンは押せないようにする)。
+    func canPerform(_ action: MessageAction, on message: MessageSummary?) -> Bool {
+        guard !isShowingSamples, let message else { return false }
+        switch action {
+        case .markRead: return !message.isRead
+        case .markUnread: return message.isRead
+        case .star: return !message.isStarred
+        case .unstar: return message.isStarred
+        case .archive: return message.mailbox == .inbox
+        case .moveToTrash: return message.mailbox != .trash
+        case .markAsJunk: return message.mailbox != .junk
+        }
+    }
+
+    private func patch(_ id: MessageID, _ change: (inout MessageSummary) -> Void) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        change(&messages[index])
+    }
+
+    private static func actionName(_ action: MessageAction) -> String {
+        switch action {
+        case .markRead: "既読に"
+        case .markUnread: "未読に"
+        case .star: "スターを付けることが"
+        case .unstar: "スターを外すことが"
+        case .archive: "アーカイブ"
+        case .moveToTrash: "削除"
+        case .markAsJunk: "迷惑メールに"
+        }
+    }
+
+    /// 本文の取得をやり直す。
+    func retryBody() async {
+        await selectMessage(selectedMessageID)
+    }
+
+    /// 選んでいるメールの添付ファイルの中身。
+    func attachmentData(_ attachment: Attachment) async throws -> Data {
+        guard let id = selectedMessageID else { throw MailRepositoryError.attachmentNotFound }
+        return try await repository.attachmentData(for: id, index: attachment.index)
+    }
+
+    /// `doing` は「本文を取得」「アーカイブ」など。「〜できませんでした。」につながる。
+    private static func describe(_ error: any Error, doing: String) -> String {
+        switch error {
+        case let error as MailRepositoryError:
+            switch error {
+            case .messageNotFound: "メールが見つかりません。新着メールを受信し直してください。"
+            case .bodyUnavailable: "本文を取得できません。"
+            case .attachmentNotFound: "添付ファイルが見つかりません。"
+            case .actionUnavailable: "見本のメールは操作できません。"
+            case .actionNotApplicable: "このメールには、その操作はできません。"
+            case let .noFolder(role): "\(folderName(role))のフォルダがサーバーにないため、\(doing)できませんでした。"
+            }
+        case let error as CustomStringConvertible:
+            "\(doing)できませんでした。\(error.description)"
+        default:
+            "\(doing)できませんでした。"
         }
     }
 
@@ -160,5 +276,30 @@ final class InboxModel {
         case .junk: "xmark.bin"
         case .trash: "trash"
         }
+    }
+}
+
+// MARK: - 右クリックのメニュー
+
+/// 行の右クリックのメニューの 1 項目 (画面の部品に依らない、中身だけ)。
+enum MessageMenuEntry: Equatable {
+    case action(title: String, action: MessageAction, isEnabled: Bool)
+    case separator
+}
+
+extension InboxModel {
+    /// 行の右クリックのメニュー。できない操作は灰色にする (見本のメールでは、すべて灰色)。
+    func menuEntries(for message: MessageSummary) -> [MessageMenuEntry] {
+        func entry(_ title: String, _ action: MessageAction) -> MessageMenuEntry {
+            .action(title: title, action: action, isEnabled: canPerform(action, on: message))
+        }
+        return [
+            message.isRead ? entry("未読にする", .markUnread) : entry("既読にする", .markRead),
+            message.isStarred ? entry("スターを外す", .unstar) : entry("スターを付ける", .star),
+            .separator,
+            entry("アーカイブ", .archive),
+            entry("削除", .moveToTrash),
+            entry("迷惑メールにする", .markAsJunk),
+        ]
     }
 }

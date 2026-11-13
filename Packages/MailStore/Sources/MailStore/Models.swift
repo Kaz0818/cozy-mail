@@ -141,11 +141,14 @@ public struct Attachment: Hashable, Sendable {
     public var filename: String
     public var mimeType: String
     public var byteCount: Int64
+    /// メールの中で何番目の添付か。中身を取り出すとき (`MailRepository.attachmentData`) に使う。
+    public var index: Int
 
-    public init(filename: String, mimeType: String, byteCount: Int64) {
+    public init(filename: String, mimeType: String, byteCount: Int64, index: Int = 0) {
         self.filename = filename
         self.mimeType = mimeType
         self.byteCount = byteCount
+        self.index = index
     }
 }
 
