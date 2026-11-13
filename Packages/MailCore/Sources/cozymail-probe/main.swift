@@ -18,12 +18,17 @@ import Darwin
 ///   swift run --package-path Packages/MailCore cozymail-probe --gmail [メールアドレス]
 ///   ブラウザが開くので、ログインするアカウントを選ぶ。
 ///
+/// 送信の確認 (自分のアドレスに、日本語の件名・本文・添付つきのテストメールを 1 通送る):
+///   swift run --package-path Packages/MailCore cozymail-probe send <SMTP サーバー> <メールアドレス> [ポート]
+///   ポートを省くと 465 (最初から暗号化)。587 なら STARTTLS で暗号化する。
+///
 /// パスワードやトークンは画面にも記録にも出さない。
 
 let usage = """
 使い方:
   cozymail-probe <IMAP サーバー> <メールアドレス> [ポート]
   cozymail-probe --gmail [メールアドレス]
+  cozymail-probe send <SMTP サーバー> <メールアドレス> [ポート]
 """
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -71,6 +76,41 @@ func signInWithGoogle(loginHint: String?) async throws -> IMAPCredentials {
     }
     print("\(email) としてログインしました (更新用トークン: \(tokens.refreshToken == nil ? "なし" : "あり"))。")
     return .oauth2(username: email, accessToken: tokens.accessToken)
+}
+
+/// 自分宛てにテストメールを送る。
+func sendTestMail(host: String, address: String, port: Int) async throws {
+    let server = SMTPServer(host: host, port: port)
+    print("\(server.host):\(server.port) に接続しています (\(server.security == .tls ? "最初から暗号化" : "STARTTLS で暗号化"))…")
+    let session = try await SMTPSession.connect(to: server, credentials: .password(username: address, password: readPassword()))
+    print("ログインしました。")
+    let me = EmailAddress(name: "Cozy Mail テスト", address: address)
+    let message = OutgoingMessage(
+        from: me,
+        to: [me],
+        subject: "Cozy Mail からのテスト送信 ✉️",
+        textBody: "これは Cozy Mail の確認用ツールから送ったテストメールです。\n日本語の件名・本文・添付ファイルが正しく読めれば成功です。\n",
+        attachments: [OutgoingAttachment(filename: "テスト.txt", mimeType: "text/plain", data: Data("添付ファイルのテストです。\n".utf8))],
+        messageID: MIMEBuilder.makeMessageID(for: me)
+    )
+    try await session.send(try MIMEBuilder.build(message), from: address, to: message.envelopeRecipients)
+    await session.quit()
+    print("送りました。\(address) の受信トレイを確かめてください。")
+}
+
+if arguments.first == "send" {
+    guard arguments.count >= 3 else {
+        print(usage)
+        exit(64)
+    }
+    do {
+        let port = arguments.count >= 4 ? Int(arguments[3]) ?? 465 : 465
+        try await sendTestMail(host: arguments[1], address: arguments[2], port: port)
+        exit(0)
+    } catch {
+        print("エラー: \(error)")
+        exit(1)
+    }
 }
 
 let formatter = DateFormatter()

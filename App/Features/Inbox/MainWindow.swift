@@ -31,6 +31,8 @@ struct MainWindow: View {
         .frame(minWidth: 1000, minHeight: 620)
         .ignoresSafeArea()
         .sheet(isPresented: $isAddingAccount) { AddAccountSheet() }
+        // メニューバーの「メッセージ」メニューが、このウィンドウのメールに対して動くように
+        .focusedSceneValue(\.inboxModel, model)
         .task { await service.start() }
         // アカウントの追加・削除や同期のたびに、画面のデータを読み直す
         .task(id: service.revision) {

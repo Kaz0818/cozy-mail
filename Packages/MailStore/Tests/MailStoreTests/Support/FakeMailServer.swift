@@ -163,6 +163,16 @@ actor FakeMailServer: MailServerSession {
         folders[target] = destination
     }
 
+    /// `APPEND` で入れたメール (フォルダ名、中身)。
+    private(set) var appended: [(folder: String, data: Data)] = []
+
+    func append(_ message: Data, to mailbox: String, flags: [String]) async throws {
+        calls.append("APPEND \(mailbox) \(flags)")
+        try checkWrite()
+        guard folders[mailbox] != nil else { throw FakeServerError.noSuchMailbox(mailbox) }
+        appended.append((mailbox, message))
+    }
+
     func close() async {
         calls.append("CLOSE")
     }

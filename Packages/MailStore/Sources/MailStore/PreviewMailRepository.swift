@@ -38,6 +38,27 @@ public struct PreviewMailRepository: MailRepository {
         throw MailRepositoryError.actionUnavailable
     }
 
+    /// 見本のメールにも返信・転送の画面は開ける (送ることはできない)。
+    public func replySource(for id: MessageID) async throws -> ReplySource {
+        guard let summary = summaries.first(where: { $0.id == id }) else { throw MailRepositoryError.messageNotFound(id) }
+        let body = try await body(for: id)
+        return ReplySource(
+            accountID: summary.accountID,
+            from: [summary.sender],
+            to: body.to,
+            cc: body.cc,
+            subject: summary.subject,
+            date: summary.date,
+            messageID: "\(id.rawValue)@preview.cozymail",
+            text: body.text
+        )
+    }
+
+    /// 見本なので送れない。
+    public func send(_ draft: Draft) async throws -> SendOutcome {
+        throw MailRepositoryError.actionUnavailable
+    }
+
     /// 見本なので、添付ファイルの中身は説明の文だけ。
     public func attachmentData(for id: MessageID, index: Int) async throws -> Data {
         guard let attachment = bodies[id]?.attachments.first(where: { $0.index == index }) else {

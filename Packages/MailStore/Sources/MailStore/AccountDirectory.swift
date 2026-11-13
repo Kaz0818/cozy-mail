@@ -126,6 +126,12 @@ public final class InMemoryAccountListStorage: AccountListStorage, @unchecked Se
 /// 登録しているアカウントの管理。追加するときは、実際にログインできることを確かめてから保存する。
 public actor AccountDirectory {
     public typealias Connector = @Sendable (IMAPServer, IMAPCredentials) async throws -> any MailServerSession
+    public typealias SenderConnector = @Sendable (SMTPServer, MailCredentials) async throws -> any MailSendingSession
+
+    /// アプリで使う送信: 本物の SMTP。
+    public static let smtpConnector: SenderConnector = { server, credentials in
+        try await SMTPSession.connect(to: server, credentials: credentials)
+    }
 
     /// アプリで使う接続: 本物の IMAP。
     public static let imapConnector: Connector = { server, credentials in
@@ -135,17 +141,23 @@ public actor AccountDirectory {
     private let storage: any AccountListStorage
     private let secrets: any SecretStore
     private let connector: Connector
+    private let senderConnector: SenderConnector
     private let makeID: @Sendable () -> String
+    /// 一度キーチェーンから読んだパスワード (アプリを閉じるまでメモリにだけ置く)。
+    /// 受信・本文・送信のたびにキーチェーンを読むと、そのたびに「キーチェーンを使おうとしています」と聞かれるため。
+    private var passwordCache: [AccountID: String] = [:]
 
     public init(
         storage: any AccountListStorage,
         secrets: any SecretStore,
         connector: @escaping Connector = AccountDirectory.imapConnector,
+        senderConnector: @escaping SenderConnector = AccountDirectory.smtpConnector,
         makeID: @escaping @Sendable () -> String = { UUID().uuidString }
     ) {
         self.storage = storage
         self.secrets = secrets
         self.connector = connector
+        self.senderConnector = senderConnector
         self.makeID = makeID
     }
 
@@ -203,6 +215,7 @@ public actor AccountDirectory {
         list.append(MailAccountSettings(account: account, imap: resolved.imap, smtp: resolved.smtp))
         do {
             try secrets.set(Data(password.utf8), for: Self.passwordKey(account.id))
+            passwordCache[account.id] = password
             try save(list)
         } catch {
             try? secrets.set(nil, for: Self.passwordKey(account.id))
@@ -215,18 +228,37 @@ public actor AccountDirectory {
     public func remove(_ id: AccountID, messages: any MessageStore) async throws {
         let list = try loadSettings().filter { $0.account.id != id }
         try save(list)
+        passwordCache[id] = nil
         try secrets.set(nil, for: Self.passwordKey(id))
         try await messages.deleteAccount(id)
     }
 
     /// 保存したパスワードでサーバーに接続する (同期に使う)。
     public func openSession(for id: AccountID) async throws -> any MailServerSession {
+        let (settings, credentials) = try savedCredentials(for: id)
+        return try await connector(IMAPServer(host: settings.imap.host, port: settings.imap.port), credentials)
+    }
+
+    /// 保存したパスワードで、送信用のサーバー (SMTP) に接続する。
+    public func openSender(for id: AccountID) async throws -> any MailSendingSession {
+        let (settings, credentials) = try savedCredentials(for: id)
+        return try await senderConnector(SMTPServer(host: settings.smtp.host, port: settings.smtp.port), credentials)
+    }
+
+    private func savedCredentials(for id: AccountID) throws -> (MailAccountSettings, MailCredentials) {
         guard let settings = try settings(for: id) else { throw AccountError.notFound }
-        guard let data = try secrets.data(for: Self.passwordKey(id)) else { throw AccountError.wrongPassword("パスワードが保存されていません") }
-        return try await connector(
-            IMAPServer(host: settings.imap.host, port: settings.imap.port),
-            .password(username: settings.account.emailAddress, password: String(decoding: data, as: UTF8.self))
-        )
+        return (settings, .password(username: settings.account.emailAddress, password: try password(for: id)))
+    }
+
+    /// パスワード。キーチェーンを読むのは、アプリを開いてからアカウントごとに 1 回だけ。
+    private func password(for id: AccountID) throws -> String {
+        if let cached = passwordCache[id] { return cached }
+        guard let data = try secrets.data(for: Self.passwordKey(id)) else {
+            throw AccountError.wrongPassword("パスワードが保存されていません")
+        }
+        let password = String(decoding: data, as: UTF8.self)
+        passwordCache[id] = password
+        return password
     }
 
     // MARK: - 部品

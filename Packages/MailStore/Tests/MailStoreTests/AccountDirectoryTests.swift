@@ -5,6 +5,31 @@ import Testing
 @testable import MailStore
 
 /// 接続のたびに、渡されたサーバー・ログイン情報を記録し、決めた結果を返す。
+/// キーチェーンを何回読んだかを数える (読むたびに Mac がパスワードを聞くことがあるため)。
+private final class CountingSecretStore: SecretStore, @unchecked Sendable {
+    private let base = InMemorySecretStore()
+    private let lock = NSLock()
+    private var reads = 0
+    var readCount: Int { lock.withLock { reads } }
+
+    func data(for key: String) throws -> Data? {
+        lock.withLock { reads += 1 }
+        return try base.data(for: key)
+    }
+
+    func set(_ data: Data?, for key: String) throws {
+        try base.set(data, for: key)
+    }
+}
+
+/// 送信用サーバーへの接続を覚える。
+private final class SenderAttempts: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [(server: SMTPServer, credentials: MailCredentials)] = []
+    var list: [(server: SMTPServer, credentials: MailCredentials)] { lock.withLock { storage } }
+    func record(_ server: SMTPServer, _ credentials: MailCredentials) { lock.withLock { storage.append((server, credentials)) } }
+}
+
 private final class ConnectorSpy: @unchecked Sendable {
     enum Outcome {
         case succeed
@@ -76,10 +101,10 @@ private final class IDCounter: @unchecked Sendable {
 @Suite struct AccountDirectoryTests {
     private func makeDirectory(
         _ spy: ConnectorSpy, storage: InMemoryAccountListStorage = InMemoryAccountListStorage(),
-        secrets: InMemorySecretStore = InMemorySecretStore()
+        secrets: any SecretStore = InMemorySecretStore()
     ) -> AccountDirectory {
         let counter = IDCounter()
-        return AccountDirectory(storage: storage, secrets: secrets, connector: spy.connector) { counter.next() }
+        return AccountDirectory(storage: storage, secrets: secrets, connector: spy.connector, makeID: { counter.next() })
     }
 
     @Test func addingAnAccountChecksTheLoginThenSavesIt() async throws {
@@ -186,6 +211,71 @@ private final class IDCounter: @unchecked Sendable {
         #expect(try await directory.accounts().isEmpty)
         #expect(try secrets.data(for: "password.\(account.id.rawValue)") == nil)
         #expect(try await store.inboxUnreadCount(account: account.id) == nil)
+    }
+
+    /// 送信は、アカウントの送信用サーバー (SMTP) に、保存したパスワードでつなぐ (T18)。
+    @Test func openingASenderUsesTheSMTPServerAndTheSavedPassword() async throws {
+        let spy = ConnectorSpy()
+        let attempts = SenderAttempts()
+        let counter = IDCounter()
+        let directory = AccountDirectory(
+            storage: InMemoryAccountListStorage(), secrets: InMemorySecretStore(), connector: spy.connector,
+            senderConnector: { server, credentials in
+                attempts.record(server, credentials)
+                throw SMTPError.connectionClosed
+            },
+            makeID: { counter.next() }
+        )
+        let account = try await directory.add(email: "me@icloud.com", password: "secret", displayName: "", choice: .automatic)
+
+        await #expect(throws: SMTPError.connectionClosed) { _ = try await directory.openSender(for: account.id) }
+
+        let attempt = try #require(attempts.list.last)
+        #expect(attempt.server == SMTPServer(host: "smtp.mail.me.com", port: 587))
+        #expect(attempt.server.security == .startTLS)
+        guard case let .password(username, password) = attempt.credentials else {
+            Issue.record("expected password credentials")
+            return
+        }
+        #expect(username == "me@icloud.com")
+        #expect(password == "secret")
+    }
+
+    /// アプリを開き直したあと、受信・送信を何度しても、キーチェーンを読むのはアカウントごとに 1 回だけ。
+    @Test func theKeychainIsReadOncePerAccountPerLaunch() async throws {
+        let spy = ConnectorSpy()
+        let storage = InMemoryAccountListStorage()
+        let secrets = CountingSecretStore()
+        let account = try await makeDirectory(spy, storage: storage, secrets: secrets)
+            .add(email: "me@yahoo.co.jp", password: "secret", displayName: "", choice: .automatic)
+
+        // 開き直したアプリ (同じ保存先を使う、新しいディレクトリ)
+        let relaunched = AccountDirectory(
+            storage: storage, secrets: secrets, connector: spy.connector,
+            senderConnector: { _, _ in throw SMTPError.connectionClosed }
+        )
+        let before = secrets.readCount
+        for _ in 0..<3 { _ = try await relaunched.openSession(for: account.id) }
+        for _ in 0..<2 { _ = try? await relaunched.openSender(for: account.id) }
+
+        #expect(secrets.readCount - before == 1)
+        guard case let .password(_, password) = try #require(spy.attempts.last).credentials else {
+            Issue.record("expected password credentials")
+            return
+        }
+        #expect(password == "secret")
+    }
+
+    /// 削除したアカウントのパスワードは、メモリにも残さない。
+    @Test func removedAccountIsForgotten() async throws {
+        let spy = ConnectorSpy()
+        let directory = makeDirectory(spy)
+        let account = try await directory.add(email: "me@yahoo.co.jp", password: "secret", displayName: "", choice: .automatic)
+        _ = try await directory.openSession(for: account.id)
+
+        try await directory.remove(account.id, messages: InMemoryMessageStore())
+
+        await #expect(throws: AccountError.notFound) { _ = try await directory.openSession(for: account.id) }
     }
 
     @Test func openingASessionUsesTheSavedPassword() async throws {

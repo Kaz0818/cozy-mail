@@ -19,6 +19,8 @@ public protocol MailServerSession: Sendable {
     func setGmailLabels(_ labels: [String], add: Bool, in mailbox: String, uids: [UInt32]) async throws
     /// 別のフォルダへ移す。
     func move(uids: [UInt32], from mailbox: String, to target: String) async throws
+    /// メールをフォルダに入れる (送ったメールを「送信済み」に残す)。
+    func append(_ message: Data, to mailbox: String, flags: [String]) async throws
     /// ログアウトして接続を閉じる。
     func close() async
 }
@@ -26,6 +28,20 @@ public protocol MailServerSession: Sendable {
 extension IMAPSession: MailServerSession {
     public func close() async {
         await logout()
+    }
+}
+
+/// 送信用 (SMTP) の接続。
+public protocol MailSendingSession: Sendable {
+    /// 組み立て済みのメールを送る。
+    func send(_ message: Data, from sender: String, to recipients: [String]) async throws
+    /// 送信を終えて接続を閉じる。
+    func close() async
+}
+
+extension SMTPSession: MailSendingSession {
+    public func close() async {
+        await quit()
     }
 }
 

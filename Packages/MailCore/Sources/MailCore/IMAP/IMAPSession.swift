@@ -311,6 +311,30 @@ public actor IMAPSession {
 
     // MARK: - 命令の送受信
 
+    /// メールをフォルダに入れる (`APPEND`)。送ったメールを「送信済み」に残すのに使う。
+    /// サーバーの「+」(続きをどうぞ) を待ってから本文を送る部分は、`IMAPClientHandler` が受け持つ。
+    public func append(_ message: Data, to mailbox: String, flags: [String] = ["\\Seen"]) async throws(IMAPError) {
+        let tag = "C\(nextTag)"
+        nextTag += 1
+        let result = collector.expect(tag: tag, on: channel.eventLoop)
+        let parts: [AppendCommand] = [
+            .start(tag: tag, appendingTo: MailboxName(ByteBuffer(string: mailbox))),
+            .beginMessage(message: AppendMessage(
+                options: AppendOptions(flagList: flags.map { Flag($0) }),
+                data: AppendData(byteCount: message.count)
+            )),
+            .messageBytes(ByteBuffer(bytes: message)),
+            .endMessage,
+            .finish,
+        ]
+        // 本文は「+」が届くまで送られないので、書き込みの完了は待たずに、命令の結果を待つ
+        for part in parts {
+            channel.write(IMAPClientHandler.Message.part(.append(part)), promise: nil)
+        }
+        channel.flush()
+        _ = try await result.wait()
+    }
+
     private func run(_ command: Command) async throws(IMAPError) -> [Response] {
         let tag = "C\(nextTag)"
         nextTag += 1

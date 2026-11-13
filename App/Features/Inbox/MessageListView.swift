@@ -5,6 +5,8 @@ import SwiftUI
 struct MessageListView: View {
     let model: InboxModel
     @Environment(MailService.self) private var service
+    @Environment(\.openWindow) private var openWindow
+    @FocusState private var isListFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -22,22 +24,36 @@ struct MessageListView: View {
             FilterTabs(selection: model.filter) { filter in
                 Task { await model.setFilter(filter) }
             }
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(model.messages) { message in
-                        MessageRow(
-                            message: message,
-                            accountName: model.accountName(for: message),
-                            isSelected: model.selectedMessageID == message.id,
-                            menu: menu(for: message)
-                        ) {
-                            Task { await model.selectMessage(message.id) }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(model.messages) { message in
+                            MessageRow(
+                                message: message,
+                                accountName: model.accountName(for: message),
+                                isSelected: model.selectedMessageID == message.id,
+                                menu: menu(for: message)
+                            ) {
+                                isListFocused = true
+                                Task { await model.selectMessage(message.id) }
+                            }
                         }
                     }
+                }
+                // キーボードで選んだメールが見えるように、一覧を動かす
+                .onChange(of: model.selectedMessageID) { _, id in
+                    guard let id else { return }
+                    withAnimation(.easeOut(duration: 0.15)) { proxy.scrollTo(id) }
                 }
             }
             .scrollContentBackground(.hidden)
             .scrollIndicators(.never)
+            // 一覧にカーソルがあるときだけ、1 文字のショートカット (↑ ↓ J K E S ⌫) を受ける
+            .focusable()
+            .focused($isListFocused)
+            .focusEffectDisabled()
+            .modifier(MessageListKeys(model: model))
+            .onAppear { isListFocused = true }
             .overlay {
                 if model.messages.isEmpty {
                     ContentUnavailableView("メールはありません", systemImage: "tray")
@@ -93,7 +109,7 @@ struct MessageListView: View {
             .accessibilityLabel(Text("新着メールを受信"))
             .help(Text("新着メールを受信 (⇧⌘N)"))
             Button {
-                // T18 で作成ウィンドウを開く
+                openWindow(id: CozyMailApp.composeWindowID, value: ComposeRequest.new())
             } label: {
                 Image(systemName: "square.and.pencil")
                     .font(.title3)
@@ -103,6 +119,7 @@ struct MessageListView: View {
             .foregroundStyle(Palette.onAccentFill)
             .glassCapsule(isProminent: true)
             .accessibilityLabel(Text("新規作成"))
+            .accessibilityIdentifier("compose.new")
             .help(Text("新規作成 (⌘N)"))
         }
         .padding(.horizontal, 6)
