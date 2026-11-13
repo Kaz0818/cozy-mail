@@ -86,8 +86,10 @@ private struct SenderNameField: View {
             do {
                 try await service.setSenderName(trimmed, for: account.id)
                 message = trimmed.isEmpty ? "メールアドレスだけで送ります。" : "「\(trimmed)」として送ります。"
-            } catch {
+            } catch let error as AccountError {
                 message = error.userMessage
+            } catch {
+                message = "保存できませんでした: \(error)"
             }
         }
     }
