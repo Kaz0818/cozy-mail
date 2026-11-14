@@ -350,7 +350,10 @@ public actor IMAPSession {
     /// フォルダを開いて IDLE に入り、変わった知らせ・時間切れ・作業の中止のどれかが来るまで待つ。
     /// 終わるときは DONE を送って IDLE を抜けるので、続けて別の命令を送れる。
     /// サーバーが IDLE を断った・接続が切れたときは投げる。
-    public func idle(in mailbox: String, timeout: Duration) async throws(IMAPError) -> IMAPIdleEvent {
+    /// DONE の返事が `doneTimeout` のあいだに来なければ、回線が黙って切れていると見なし、接続を閉じて投げる。
+    public func idle(
+        in mailbox: String, timeout: Duration, doneTimeout: Duration = .seconds(15)
+    ) async throws(IMAPError) -> IMAPIdleEvent {
         try await ensureExamined(mailbox)
         let eventLoop = channel.eventLoop
         let tag = "C\(nextTag)"
@@ -366,8 +369,7 @@ public actor IMAPSession {
         } catch {
             throw .connectionClosed
         }
-        let (seconds, attoseconds) = timeout.components
-        let timer = eventLoop.scheduleTask(in: .nanoseconds(seconds * 1_000_000_000 + attoseconds / 1_000_000_000)) {
+        let timer = eventLoop.scheduleTask(in: Self.timeAmount(timeout)) {
             race.finish(.timedOut)
         }
         let event = await withTaskCancellationHandler {
@@ -383,9 +385,22 @@ public actor IMAPSession {
             } catch {
                 throw .connectionClosed
             }
+            // DONE の返事を待つのは決めた時間まで。来なければ接続を閉じる (閉じると、待っている結果も失敗する)
+            let channel = channel
+            let watchdog = eventLoop.scheduleTask(in: Self.timeAmount(doneTimeout)) {
+                channel.close(promise: nil)
+            }
+            defer { watchdog.cancel() }
+            _ = try await result.wait()
+        } else {
+            _ = try await result.wait()
         }
-        _ = try await result.wait()
         return event
+    }
+
+    private static func timeAmount(_ duration: Duration) -> TimeAmount {
+        let (seconds, attoseconds) = duration.components
+        return .nanoseconds(seconds * 1_000_000_000 + attoseconds / 1_000_000_000)
     }
 
     private func run(_ command: Command) async throws(IMAPError) -> [Response] {

@@ -108,6 +108,28 @@ import Testing
         }
     }
 
+    /// 回線が黙って切れていると、DONE に返事が来ない。決めた時間で諦めて投げる (いつまでも待たない)。
+    @Test func aSilentServerAfterDoneThrowsInsteadOfHanging() async throws {
+        let silent: FakeIMAPServer.Responder = { command in
+            command.uppercased() == "<CONTINUATION>DONE" ? [] : Self.script(onIdle: ["+ idling"])(command)
+        }
+        try await withSession(silent) { session, _ in
+            let start = ContinuousClock.now
+            await #expect(throws: IMAPError.self) {
+                try await session.idle(in: "INBOX", timeout: .milliseconds(100), doneTimeout: .milliseconds(300))
+            }
+            #expect(ContinuousClock.now - start < .seconds(3))
+        }
+        try await withSession(silent) { session, _ in
+            let task = Task { try await session.idle(in: "INBOX", timeout: .seconds(60), doneTimeout: .milliseconds(300)) }
+            try await Task.sleep(for: .milliseconds(100))
+            task.cancel()
+            let start = ContinuousClock.now
+            await #expect(throws: IMAPError.self) { try await task.value }
+            #expect(ContinuousClock.now - start < .seconds(3))
+        }
+    }
+
     @Test func aDroppedConnectionThrows() async throws {
         try await withSession(Self.script(onIdle: ["+ idling", "* BYE server shutting down"])) { session, _ in
             await #expect(throws: IMAPError.self) { try await session.idle(in: "INBOX", timeout: .seconds(5)) }

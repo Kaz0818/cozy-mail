@@ -142,6 +142,28 @@ import Testing
         #expect(await recorder.sleeps.prefix(3).allSatisfy { $0 == .seconds(60) })
     }
 
+    /// つながるのに IDLE がすぐ失敗するサーバーでも、待ち時間を延ばしていく (1 秒ごとに同期し続けない)。
+    @Test func backsOffWhenIdleKeepsFailingAfterConnecting() async {
+        let sessions = (0..<8).map { _ in ScriptedSession(steps: [.fail]) }
+        let recorder = Recorder()
+        await run(sessions: sessions, recorder: recorder) { await $0.sleeps.count >= 6 }
+        let sleeps = await recorder.sleeps
+        #expect(Array(sleeps.prefix(5)) == [.seconds(1), .seconds(2), .seconds(4), .seconds(8), .seconds(16)])
+    }
+
+    /// 一度うまく見張れたら、次に切れたときは 1 秒から待ち直す。
+    @Test func aHealthyConnectionResetsTheBackoff() async {
+        let sessions = [
+            ScriptedSession(steps: [.fail]),
+            ScriptedSession(steps: [.fail]),
+            ScriptedSession(steps: [.event(.timedOut), .fail]),
+            ScriptedSession(steps: []),
+        ]
+        let recorder = Recorder()
+        await run(sessions: sessions, recorder: recorder) { await $0.opens >= 4 }
+        #expect(Array(await recorder.sleeps.prefix(3)) == [.seconds(1), .seconds(2), .seconds(1)])
+    }
+
     @Test func stoppingClosesTheConnection() async {
         let session = ScriptedSession(steps: [])
         let recorder = Recorder()

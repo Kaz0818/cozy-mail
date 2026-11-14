@@ -63,15 +63,18 @@ public struct NewMailWatcher: Sendable {
                 retry = min(retry * 2, timing.maxRetry)
                 continue
             }
-            retry = timing.firstRetry
             if connectedBefore { await onChange() }
             connectedBefore = true
+            var healthy = false
             do {
-                try await watch(session)
+                try await watch(session, healthy: &healthy)
                 await session.close()
                 return
             } catch {
                 await session.close()
+                // 一度でもちゃんと見張れた接続なら、1 秒から待ち直す。すぐ失敗する接続なら、待ち時間を延ばしていく
+                // (つながるのに IDLE が失敗し続けるサーバーで、1 秒ごとに同期し続けないため)
+                if healthy { retry = timing.firstRetry }
                 guard await pause(retry) else { return }
                 retry = min(retry * 2, timing.maxRetry)
             }
@@ -79,10 +82,13 @@ public struct NewMailWatcher: Sendable {
     }
 
     /// 1 つの接続で見張り続ける。止められたら戻り、切れたら投げる。
-    private func watch(_ session: any MailServerSession) async throws {
+    /// IDLE が結果を返した・1 分の確認が 1 回済んだら `healthy` を true にする。
+    private func watch(_ session: any MailServerSession, healthy: inout Bool) async throws {
         if try await session.supportsIdle() {
             while !Task.isCancelled {
-                switch try await session.idle(in: mailbox, timeout: timing.idleRenewal) {
+                let event = try await session.idle(in: mailbox, timeout: timing.idleRenewal)
+                healthy = true
+                switch event {
                 case .changed: await onChange()
                 case .timedOut: continue
                 case .cancelled: return
@@ -91,6 +97,7 @@ public struct NewMailWatcher: Sendable {
         } else {
             while !Task.isCancelled {
                 guard await pause(timing.pollInterval) else { return }
+                healthy = true
                 await onChange()
             }
         }
