@@ -149,6 +149,8 @@ public enum IMAPError: Error, Equatable, CustomStringConvertible {
     case unexpectedResponse(String)
     /// 指定した UID のメールがサーバーにない (削除された、またはフォルダが作り直された)。
     case messageNotFound(uid: UInt32)
+    /// サーバーがその仕組みに対応していない (例: `UIDPLUS`)。安全のため、何もしていない。
+    case unsupported(String)
 
     public var description: String {
         switch self {
@@ -157,6 +159,7 @@ public enum IMAPError: Error, Equatable, CustomStringConvertible {
         case let .commandFailed(reason): "サーバーが処理を断りました: \(reason)"
         case .connectionClosed: "サーバーとの接続が切れました"
         case let .unexpectedResponse(reason): "サーバーの応答を読めませんでした: \(reason)"
+        case let .unsupported(feature): "このサーバーは \(feature) に対応していないため、行いませんでした"
         case .messageNotFound: "メールがサーバーに見つかりませんでした。削除されたか、移動された可能性があります"
         }
     }

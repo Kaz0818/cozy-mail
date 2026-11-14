@@ -33,7 +33,7 @@ struct ComposeWindow: View {
                 repository: service.repository, signatures: service.signatures,
                 sendLater: { await service.sendLater($0) },
                 // 書きかけは Mac に自動で保存する (T23a)
-                drafts: service.drafts, onDraftsChanged: { service.draftsChanged() }
+                drafts: service.drafts, onDraftsChanged: { change in Task { await service.draftChanged(change) } }
             )
             self.model = model
             // 取り消した・送れなかったメールなら、その中身で開く (T24)

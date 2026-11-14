@@ -60,6 +60,26 @@ import Testing
         #expect(await store.all().map(\.content.subject) == ["会議"])
     }
 
+    /// サーバーの写しを消せなかったものを覚えておく (T23b)。下書きの一覧には出ない。
+    @Test func pendingServerRemovalsAreKeptApartFromDrafts() async throws {
+        let store = DraftStore(directory: FileManager.default.temporaryDirectory.appendingPathComponent("Drafts-\(UUID().uuidString)"))
+        let first = UUID()
+        let second = UUID()
+        try await store.addPendingRemoval(first, accountID: AccountID("a"))
+        try await store.addPendingRemoval(first, accountID: AccountID("a"))  // 同じものは 1 つだけ
+        try await store.addPendingRemoval(second, accountID: AccountID("b"))
+        #expect(await store.all().isEmpty)
+        #expect(await store.pendingRemovals() == [
+            PendingServerRemoval(id: first, accountID: AccountID("a")),
+            PendingServerRemoval(id: second, accountID: AccountID("b")),
+        ])
+
+        try await store.updatePendingRemovals([PendingServerRemoval(id: second, accountID: AccountID("b"), attempts: 1)])
+        #expect(await store.pendingRemovals() == [PendingServerRemoval(id: second, accountID: AccountID("b"), attempts: 1)])
+        try await store.updatePendingRemovals([])
+        #expect(await store.pendingRemovals().isEmpty)
+    }
+
     @Test func contentBecomesADraftForSending() {
         let draft = content("会議").draft
         #expect(draft.to == [Contact(name: "田中", address: "t@example.com")])  // 読めない宛先は除く
@@ -118,6 +138,31 @@ import Testing
         }
         try await repository.perform(.moveToTrash, on: [LocalDraft.messageID(id)])
         #expect(await drafts.draft(id) == nil)
+    }
+
+    /// Mac の下書きを消したら、消した下書きを知らせる (サーバーの写しを消すため、T23b)。消せない操作では知らせない。
+    @Test func deletingALocalDraftReportsIt() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("DraftsMerging-\(UUID().uuidString)")
+        let drafts = DraftStore(directory: directory)
+        let id = UUID()
+        try await drafts.save(DraftContent(accountID: account, subject: "書きかけ"), id: id)
+        let deleted = DeletedDrafts()
+        let repository = DraftsMergingRepository(
+            base: PreviewMailRepository(), drafts: drafts, onDelete: { await deleted.add($0) }
+        )
+        await #expect(throws: MailRepositoryError.actionNotApplicable) {
+            try await repository.perform(.archive, on: LocalDraft.messageID(id))
+        }
+        #expect(await deleted.list.isEmpty)
+        try await repository.perform(.moveToTrash, on: LocalDraft.messageID(id))
+        let reported = await deleted.list
+        #expect(reported.map(\.id) == [id])
+        #expect(reported.first?.content.accountID == account)
+    }
+
+    private actor DeletedDrafts {
+        private(set) var list: [SavedDraft] = []
+        func add(_ saved: SavedDraft) { list.append(saved) }
     }
 
     @Test func localDraftIDsRoundTrip() {

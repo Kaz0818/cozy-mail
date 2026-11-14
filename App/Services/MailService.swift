@@ -24,6 +24,14 @@ final class MailService {
         static let none = NotificationHooks()
     }
 
+    /// 下書きをサーバーの下書きフォルダにも置くつなぎ口 (T23b)。アプリだけ。テストでは記録だけ、見本では使わない。
+    struct ServerDraftHooks: Sendable {
+        /// 下書きを置く (前に置いたものは置き直す)。
+        var upload: @Sendable (SavedDraft) async throws -> Void
+        /// このアカウントに置いた、この下書きの写しを消す。
+        var remove: @Sendable (UUID, AccountID) async throws -> Void
+    }
+
     /// 通知を押したときに、画面に「このメールを開いて」と頼むもの。`serial` は頼むたびに増える (同じメールを続けて開けるように)。
     struct OpenRequest: Equatable {
         var serial = 0
@@ -87,6 +95,13 @@ final class MailService {
     private(set) var sendNotices: [SendNotice] = []
     /// 取り消した・送れなかったメールの下書き。作成ウィンドウで開き直すときに `takeRestoredDraft` で受け取る。
     private var restoredDrafts: [UUID: Draft] = [:]
+    /// サーバーの下書きフォルダに写しを置くか (T23b)。nil なら置かない。
+    private let serverDrafts: ServerDraftHooks?
+    /// いまサーバーに置いている下書きと、置いている間にまた保存された下書き (終わったら最新のものを置き直す)。
+    private var uploadingDrafts: Set<UUID> = []
+    private var reuploadDrafts: Set<UUID> = []
+    /// 下書きの写しを置いたアカウント (差出人を変えたときに、前のアカウントの写しを消すため)。アプリを閉じると忘れる。
+    private var serverDraftAccounts: [UUID: AccountID] = [:]
     /// 送信を取り消せる秒数 (設定)。0 ならすぐ送る。
     private let undoSendDelay: @MainActor () -> Duration
     @ObservationIgnored private lazy var sendQueue = SendQueue(
@@ -106,7 +121,8 @@ final class MailService {
         undoSendDelay: @escaping @MainActor () -> Duration = { .zero },
         drafts: DraftStore = DraftStore(
             directory: FileManager.default.temporaryDirectory.appendingPathComponent("CozyMailDrafts-\(UUID().uuidString)")
-        )
+        ),
+        serverDrafts: ServerDraftHooks? = nil
     ) {
         self.directory = directory
         self.signatures = signatures
@@ -115,15 +131,25 @@ final class MailService {
         self.watchesForNewMail = watchesForNewMail
         self.notifications = notifications
         self.undoSendDelay = undoSendDelay
+        self.serverDrafts = serverDrafts
         engine = SyncEngine(store: store)
     }
 
     /// アプリで使う組み合わせ: アカウント一覧は UserDefaults、パスワードはキーチェーン。新着を見張る。
     static func live() -> MailService {
         let notifier = NotificationService.shared
+        let store = makeLiveStore()
+        let directory = AccountDirectory(storage: UserDefaultsAccountListStorage(), secrets: KeychainSecretStore())
+        // サーバーの下書き (T23b)。アカウントは、アプリが読み込み済みの一覧を使う (`repository` と同じ理由)
+        let accounts = LiveAccounts()
+        let server = ServerDrafts(
+            store: store,
+            accounts: { await accounts.list() },
+            openSession: { accountID in try await directory.openSession(for: accountID) }
+        )
         let service = MailService(
-            directory: AccountDirectory(storage: UserDefaultsAccountListStorage(), secrets: KeychainSecretStore()),
-            store: makeLiveStore(),
+            directory: directory,
+            store: store,
             watchesForNewMail: true,
             notifications: NotificationHooks(
                 prepare: { notifier.start() },
@@ -132,10 +158,21 @@ final class MailService {
             ),
             signatures: .live(),
             undoSendDelay: { UndoSendSetting.delay(in: .standard) },
-            drafts: makeLiveDrafts()
+            drafts: makeLiveDrafts(),
+            serverDrafts: ServerDraftHooks(
+                upload: { try await server.upload($0) },
+                remove: { try await server.remove(id: $0, accountID: $1) }
+            )
         )
+        accounts.service = service
         notifier.onOpen = { [weak service] id in service?.requestOpen(id) }
         return service
+    }
+
+    /// `live()` のサーバーの下書きに、読み込み済みのアカウント一覧を渡すためのもの (サービスを作ったあとでつなぐ)。
+    @MainActor private final class LiveAccounts: Sendable {
+        weak var service: MailService?
+        func list() -> [Account] { service?.accounts ?? [] }
     }
 
     /// 通知が押された。画面にそのメールを開いてもらう。
@@ -174,6 +211,127 @@ final class MailService {
         revision += 1
     }
 
+    // MARK: - サーバーの下書き (T23b)
+
+    /// 作成ウィンドウで下書きを保存した・閉じた・消した。下書きフォルダを読み直し、サーバーの写しを置き直す・消す。
+    /// サーバーに置けなくても、Mac の下書きは残っているので知らせない (次に閉じたときに置き直す)。
+    /// 消せなかった写しは覚えておき、同期のあとで消し直す (`retryServerDraftRemovals`)。
+    func draftChanged(_ change: DraftChange) async {
+        draftsChanged()
+        guard let hooks = serverDrafts, !isShowingSamples else { return }
+        switch change {
+        case .saved:
+            // 打っている間の自動保存は Mac だけ (Gmail の 1 日に置ける量に上限があるため)
+            return
+        case let .closed(id):
+            await uploadDraft(id, hooks: hooks)
+        case let .removed(id, accountID):
+            await removeServerDraft(id, accountID: accountID, hooks: hooks)
+        }
+    }
+
+    /// 一覧の「削除」で Mac の下書きを消した。サーバーの写しも消す。
+    func localDraftDeleted(_ saved: SavedDraft) async {
+        await draftChanged(.removed(saved.id, saved.content.accountID))
+    }
+
+    /// 保存した下書きの最新の中身を置く。置いている途中に頼まれたら、終わってからもう 1 回だけ置き直す。
+    private func uploadDraft(_ id: UUID, hooks: ServerDraftHooks) async {
+        guard !uploadingDrafts.contains(id) else {
+            reuploadDrafts.insert(id)
+            return
+        }
+        uploadingDrafts.insert(id)
+        defer { uploadingDrafts.remove(id) }
+        repeat {
+            reuploadDrafts.remove(id)
+            // 置く直前に読み直す (消したあとなら置かない)
+            guard let saved = await drafts.draft(id) else { return }
+            let accountID = saved.content.accountID
+            // 差出人を変えたら、前のアカウントに置いた写しを先に消す
+            if let previous = serverDraftAccounts[id], previous != accountID {
+                await removeOrRemember(id, accountID: previous, hooks: hooks)
+                serverDraftAccounts[id] = nil
+            }
+            guard let accountID else { continue }
+            serverDraftAccounts[id] = accountID
+            // このアカウントに覚えていた「消す」は、もう要らない (置き直したものを消さないように)
+            await forgetPendingRemoval(id, accountID: accountID)
+            try? await hooks.upload(saved)
+        } while reuploadDrafts.contains(id)
+    }
+
+    /// サーバーの写しを消す。置いている途中なら、終わるのを待ってから消す (消したあとに置かれないように)。
+    private func removeServerDraft(_ id: UUID, accountID: AccountID?, hooks: ServerDraftHooks) async {
+        reuploadDrafts.remove(id)
+        while uploadingDrafts.contains(id) {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        var targets: [AccountID] = []
+        for candidate in [accountID, serverDraftAccounts[id]] {
+            if let candidate, !targets.contains(candidate) { targets.append(candidate) }
+        }
+        serverDraftAccounts[id] = nil
+        for target in targets {
+            await removeOrRemember(id, accountID: target, hooks: hooks)
+        }
+    }
+
+    /// 写しを消す。消せなければ覚えておく (あとで消し直す)。
+    private func removeOrRemember(_ id: UUID, accountID: AccountID, hooks: ServerDraftHooks) async {
+        do {
+            try await hooks.remove(id, accountID)
+        } catch {
+            try? await drafts.addPendingRemoval(id, accountID: accountID)
+        }
+    }
+
+    private func forgetPendingRemoval(_ id: UUID, accountID: AccountID) async {
+        let list = await drafts.pendingRemovals()
+        let kept = list.filter { !($0.id == id && $0.accountID == accountID) }
+        guard kept.count != list.count else { return }
+        try? await drafts.updatePendingRemovals(kept)
+    }
+
+    /// 消し直しをしている途中か (重ねて始めない)。
+    private var isRetryingRemovals = false
+    /// 消し直す回数の上限。届いたらあきらめる (UIDPLUS がない、アカウントを消したなど、ずっと消せないもののため)。
+    static let removalAttemptLimit = 5
+
+    /// 前に消せなかったサーバーの写しを、消し直す。同期のあとに呼ぶ。
+    func retryServerDraftRemovals() async {
+        guard let hooks = serverDrafts, !isShowingSamples, !isRetryingRemovals else { return }
+        isRetryingRemovals = true
+        defer { isRetryingRemovals = false }
+        let pending = await drafts.pendingRemovals()
+        guard !pending.isEmpty else { return }
+        var finished: [PendingServerRemoval] = []
+        var failed: [PendingServerRemoval] = []
+        for item in pending {
+            // 同じ下書きを、またこのアカウントで使っている (置き直した) なら、消さない
+            if let draft = await drafts.draft(item.id), draft.content.accountID == item.accountID {
+                finished.append(item)
+                continue
+            }
+            do {
+                try await hooks.remove(item.id, item.accountID)
+                finished.append(item)
+            } catch {
+                failed.append(item)
+            }
+        }
+        // 消し直している間に足されたものは残す
+        let same = { (a: PendingServerRemoval, b: PendingServerRemoval) in a.id == b.id && a.accountID == b.accountID }
+        let updated = await drafts.pendingRemovals().compactMap { item -> PendingServerRemoval? in
+            if finished.contains(where: { same($0, item) }) { return nil }
+            guard failed.contains(where: { same($0, item) }) else { return item }
+            var next = item
+            next.attempts += 1
+            return next.attempts >= Self.removalAttemptLimit ? nil : next
+        }
+        try? await drafts.updatePendingRemovals(updated)
+    }
+
     /// SwiftUI プレビュー用: 何も保存しない。
     static func preview() -> MailService {
         MailService(
@@ -198,7 +356,11 @@ final class MailService {
             // 送信も、そのたびに送信用のサーバーにつなぎ、送ったら閉じる
             openSender: { accountID in try await directory.openSender(for: accountID) }
         )
-        return DraftsMergingRepository(base: live, drafts: drafts)
+        return DraftsMergingRepository(
+            base: live, drafts: drafts,
+            // 一覧の「削除」で消したら、サーバーの写しも消す (T23b)
+            onDelete: { [weak self] saved in await self?.localDraftDeleted(saved) }
+        )
     }
 
     var isShowingSamples: Bool {
@@ -240,6 +402,8 @@ final class MailService {
         for id in Array(resyncRequested) where !syncingAccounts.contains(id) {
             await sync(accountID: id)
         }
+        // 前に消せなかったサーバーの下書きの写しを、消し直す (T23b)
+        await retryServerDraftRemovals()
     }
 
     /// 1 つのアカウントを同期する (新着の知らせを受けたとき)。同期中にまた頼まれたら、

@@ -89,14 +89,16 @@ final class ComposeModel {
     private let drafts: DraftStore?
     /// 打つのをやめてから保存するまでの時間。
     private let autosaveDelay: Duration
-    /// 下書きを保存した・消したときに呼ぶ (下書きフォルダを読み直してもらう)。
-    private let onDraftsChanged: (@MainActor () -> Void)?
+    /// 下書きを保存した・消したときに呼ぶ (下書きフォルダを読み直し、サーバーの写しを置き直す・消す)。
+    private let onDraftsChanged: (@MainActor (DraftChange) -> Void)?
     /// この作成ウィンドウの下書きの番号。下書きフォルダから開いたときは、その下書きの番号。
     private(set) var draftID = UUID()
     /// 最後に保存した (または開いたときの) 中身。これと同じなら保存しない。
     private var savedContent: DraftContent?
     /// 下書きを保存したことがあるか (送ったとき・捨てたときに消すため)。
     private var hasStoredDraft = false
+    /// このウィンドウを開いてから保存したか (閉じたときに、サーバーに置き直すため)。
+    private var savedSinceOpening = false
     /// 送った・捨てたあとは、もう保存しない。
     private var isFinished = false
     private var autosaveTask: Task<Void, Never>?
@@ -105,7 +107,7 @@ final class ComposeModel {
         repository: any MailRepository, signatures: SignatureStore? = nil,
         sendLater: (@MainActor (Draft) async -> Bool)? = nil,
         drafts: DraftStore? = nil, autosaveDelay: Duration = .seconds(2),
-        onDraftsChanged: (@MainActor () -> Void)? = nil
+        onDraftsChanged: (@MainActor (DraftChange) -> Void)? = nil
     ) {
         self.repository = repository
         self.signatures = signatures
@@ -146,16 +148,21 @@ final class ComposeModel {
             try await drafts.save(current, id: draftID)
             savedContent = current
             hasStoredDraft = true
-            onDraftsChanged?()
+            savedSinceOpening = true
+            onDraftsChanged?(.saved(draftID))
         } catch {
             errorMessage = "下書きを保存できませんでした: \(error.localizedDescription)"
         }
     }
 
     /// ウィンドウを閉じるとき: 書きかけなら待たずに保存する。
+    /// 開いてから保存していれば、サーバーにも置いてもらう (T23b。打つたびではなく、閉じたときだけ)。
     func closing() async {
         autosaveTask?.cancel()
         await saveDraft()
+        guard savedSinceOpening, hasStoredDraft, !isFinished else { return }
+        savedSinceOpening = false
+        onDraftsChanged?(.closed(draftID))
     }
 
     /// 「下書きを捨てる」。保存した下書きを消し、もう保存しない。
@@ -170,7 +177,8 @@ final class ComposeModel {
         guard let drafts, hasStoredDraft else { return }
         try? await drafts.delete(draftID)
         hasStoredDraft = false
-        onDraftsChanged?()
+        // サーバーの写しは、最後に保存したときの差出人のアカウントにある (保存したときにだけ置くため)
+        onDraftsChanged?(.removed(draftID, savedContent?.accountID))
     }
 
     private func signature(for id: AccountID?) -> String {
@@ -326,4 +334,14 @@ final class ComposeModel {
             return "送れませんでした: \(error)"
         }
     }
+}
+
+/// 作成ウィンドウの下書きに起きたこと (T23b)。サーバーの下書きフォルダの写しを置き直す・消すのに使う。
+enum DraftChange: Equatable {
+    /// Mac に保存した (打っている間の自動保存。サーバーには置かない)。
+    case saved(UUID)
+    /// 保存した下書きのウィンドウを閉じた。サーバーに置く。
+    case closed(UUID)
+    /// Mac から消した (送った・捨てた)。アカウントは、サーバーに写しを置いたはずの差出人。
+    case removed(UUID, AccountID?)
 }
