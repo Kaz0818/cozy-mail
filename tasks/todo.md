@@ -126,11 +126,11 @@
 **触るファイル:** `App/Features/Reader/ReaderView.swift`、`App/Features/Reader/ReaderHeader.swift`、`App/Features/Reader/AttachmentCard.swift`、`App/Features/Reader/ReaderToolbar.swift`
 **大きさ:** M
 
-### ✅ チェックポイント v0.0 — 🍎 オーナーの見比べ待ち
-- [ ] 🍎 アプリの画面を見本の 2 枚と並べて、オーナーが「ほぼ同じ」と判断する — デザインは 2026-11-13 に直して、オーナーがホバーの光り方まで確認。「ほぼ同じ」の判断はオーナー待ち
+### ✅ チェックポイント v0.0
+- [x] 🍎 アプリの画面を見本の 2 枚と並べて、オーナーが「ほぼ同じ」と判断する (2026-11-14 オーナーが Mac で確認。docs/manual-test.md の 7)
 - [x] 🍎 ライト / ダーク / システムに合わせる が切り替わる (2026-11-13 オーナーが Mac で確認)
 - [x] 🐧 すべてのパッケージのテストが通る (CI で通過)
-- [ ] **オーナーと確認してから次に進む**
+- [x] **オーナーと確認してから次に進む** (2026-11-14 オーナーが Mac で確認)
 
 ---
 
@@ -239,7 +239,7 @@
 - [x] 🐧 `swift test --package-path Packages/MailStore` (2026-11-13 時点で 87 件すべて通過。SwiftData のテストは Linux では空)
 - [x] 🐧 `cd Packages/MailStore && xcodebuild test -scheme MailStore-Package -destination 'platform=macOS'` (Mac で実行。2026-11-14 に 113 件すべて通過)
 - [x] 🐧 `xcodebuild test -scheme CozyMail -destination 'platform=macOS'` (2026-11-14 に単体 59 件 + UI 6 件すべて通過。重さの修正のあとも、単体 59 件 + UI 6 件すべて通過)
-- [ ] 🍎 アプリを閉じて開き直すと、前回の一覧がすぐ出て、開いたことのあるメールは本文も出る (2026-11-14 に Claude が Mac で確認済み。キーチェーンの確認が出たままでも出た。オーナーの確認待ち)
+- [x] 🍎 アプリを閉じて開き直すと、前回の一覧がすぐ出て、開いたことのあるメールは本文も出る (2026-11-14 オーナーが Mac で確認)
 
 **依存:** T7, T8
 **触るファイル:** `Packages/MailStore/Sources/MailStore/MessageStore.swift` (メモリ上の実装 `InMemoryMessageStore` もここ)、`SyncEngine.swift`、`LiveMailRepository.swift`、`Sources/MailStoreSwiftData/SwiftDataMessageStore.swift`、`Package.swift`、`App/Services/MailService.swift`、`App/CozyMailApp.swift`、`project.yml`、`Tests/MailStoreTests/SyncEngineTests.swift`、`Tests/MailStoreTests/SwiftDataMessageStoreTests.swift`、`Tests/MailStoreTests/MessageQueryTests.swift`、`AppTests/MailServiceStartupTests.swift`、`AppTests/CozyMailAppTests.swift`
@@ -284,7 +284,7 @@
 
 ### T13: フォルダとラベルで絞り込める
 
-> 状態 (2026-11-14): 🐧 アカウントを選ぶと、そのアカウントの Gmail のラベル (自分で作ったもの) がサイドバーの「ラベル」に出て、選ぶとそのラベルのメールが出る。🍎 実アカウントでの確認待ち。
+> 状態 (2026-11-14): ✅ (PR #11 マージ済み、オーナーが Mac で確認) アカウントを選ぶと、そのアカウントの Gmail のラベル (自分で作ったもの) がサイドバーの「ラベル」に出て、選ぶとそのラベルのメールが出る。オーナーが実アカウントで確認済み。
 > - ラベルの一覧は、同期のたびに Gmail のフォルダの一覧 (LIST) から覚え直す。`INBOX`、`[Gmail]/...` (`[Google Mail]/...`)、役割の決まったフォルダ、入れ物だけのフォルダは入れない。Gmail で消したラベルは次の同期で消える。
 > - ラベルを開くと、そのラベルが付いたメールが出る。Gmail の Web 版と同じく、迷惑メールとゴミ箱のメールは出さない。「仕事」と「仕事/経理」は別のラベルとして扱い、入れ子は「仕事/経理」のように 1 行で並べる。ラベルごとに未読数を出す。
 > - 開いていたラベルが Gmail で消されたら、そのアカウントの受信トレイに戻る。
@@ -301,17 +301,17 @@
 **確認:**
 - [x] 🐧 `SPECIAL-USE` の判定と、Gmail のラベルの扱いのテスト (`specialUseWinsOverNames`、`foldersWithoutSpecialUseAreRecognisedByName`、`gmailLabelChangesMoveMessagesBetweenFolders`)
 - [x] 🐧 ラベルの一覧と絞り込み (`gmailRemembersTheLabelsYouMade`、`gmailLabelListFollowsTheServer`、`MessageQueryTests`、`AccountLabelsTests`、`labelsSurviveReopening`)。Mac で MailStore 120 件、アプリ 62 件 + UI 6 件すべて通過 (2026-11-14)
-- [ ] 🍎 各フォルダの件数が Web 版と一致する
-- [ ] 🍎 Gmail のアカウントを選ぶと、自分で作ったラベルが出て、選ぶと Web 版のそのラベルと同じメールが出る (最近 30 日より前のメールは保存していないので、その分は出ない)
+- [x] 🍎 各フォルダの件数が Web 版と一致する (2026-11-14 オーナーが Mac で確認)
+- [x] 🍎 Gmail のアカウントを選ぶと、自分で作ったラベルが出て、選ぶと Web 版のそのラベルと同じメールが出る (最近 30 日より前のメールは保存していないので、その分は出ない) (2026-11-14 オーナーが Mac で確認)
 
 **依存:** T12
 **触るファイル:** `Packages/MailStore/Sources/MailStore/Models.swift`、`MailRepository.swift`、`MessageStore.swift`、`LiveMailRepository.swift`、`SyncEngine.swift`、`Sources/MailStoreSwiftData/SwiftDataMessageStore.swift`、`App/Features/Inbox/InboxModel.swift`、`App/Features/Inbox/SidebarView.swift`、`Tests/MailStoreTests/SyncEngineTests.swift`、`MessageQueryTests.swift`、`AccountLabelsTests.swift`、`SwiftDataMessageStoreTests.swift`、`AppTests/InboxModelLabelTests.swift`
 **大きさ:** M
 
 ### ✅ チェックポイント: 受信
-- [ ] 🍎 4 アカウントの受信トレイが統合受信トレイに出て、未読数がサーバーと一致する
+- [x] 🍎 4 アカウントの受信トレイが統合受信トレイに出て、未読数がサーバーと一致する (2026-11-14 オーナーが Mac で確認。Gmail 3 アカウントで。Yahoo! はアドレスがないため、持ったときに)
 - [x] 🐧 すべてのパッケージのテストが通る (CI で通過)
-- [ ] **オーナーと確認してから次に進む**
+- [x] **オーナーと確認してから次に進む** (2026-11-14 オーナーが Mac で確認)
 
 ### T14: 本文を開いて読める
 
@@ -435,9 +435,9 @@
 
 **確認:**
 - [x] 🐧 検索のテスト (日本語を含む)。メモリ上と SwiftData の保存先で、同じ結果になることを全フォルダ × 絞り込み × 12 個の言葉 (漢字・かな・英字) で比べる
-- [ ] 🍎 実際のアカウントで検索する
+- [x] 🍎 実際のアカウントで検索する (2026-11-14 オーナーが Mac で確認)
 
-> 状態 (2026-11-14): 🐧 済み (ブランチ `t19-search`、PR #11 のあとにマージ)。
+> 状態 (2026-11-14): ✅ (PR #12 マージ済み、オーナーが実アカウントで確認)。残りは本文全体で探すかの相談だけ。
 > - 探す場所: 登録中のすべてのアカウントの、迷惑メールとゴミ箱を除くすべてのフォルダ (Gmail の検索と同じ)。選んでいるフォルダには関係なく探す。「未読」「スター付き」の絞り込みは検索の結果にも効く。
 > - 探すもの: 差出人の名前・アドレス、件名、本文の書き出し。空白で区切った言葉は、すべてを含むもの。大文字と小文字、アクセント記号は区別しない。
 > - 画面: 打つたびに探す。一覧の見出しが「検索」、その下に「「言葉」・n件」。esc か欄の × で検索をやめる。サイドバーでフォルダを選んでも検索をやめる。見つからないときは「見つかりませんでした」。
@@ -451,8 +451,8 @@
 **大きさ:** S
 
 ### ✅ チェックポイント v0.1
-- [ ] 🍎 SPEC の P0 のユーザーストーリー (US-1〜US-11) の受け入れ条件を、実際の 4 アカウントで確認する
-- [ ] 🍎 `docs/manual-test.md` の手順をすべて通す (手順書は 2026-11-14 に作った)
+- [ ] 🍎 SPEC の P0 のユーザーストーリー (US-1〜US-11) の受け入れ条件を、実際の 4 アカウントで確認する — 作ったものは 2026-11-14 にオーナーが確認。残り: まだ作っていない P0 (Dock の未読数 US-9、添付のドラッグ US-5、本文全体の検索 US-10) をどうするかの判断と、Yahoo!
+- [x] 🍎 `docs/manual-test.md` の手順をすべて通す (2026-11-14 オーナーが Mac で確認。Yahoo! の手順は除く)
 - [x] 🐧 すべてのパッケージのテストが通る (CI で通過)
 - [ ] **オーナーと確認して、フェーズ 4 を細かく決め直す**
 
