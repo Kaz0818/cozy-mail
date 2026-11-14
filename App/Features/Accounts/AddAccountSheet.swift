@@ -2,6 +2,7 @@ import MailStore
 import SwiftUI
 
 /// アカウント追加のシート (US-1、US-2)。メールアドレスとアプリパスワードを入れると、サーバー設定は自動で入る。
+/// 独自ドメインなどは「その他」を選び、受信・送信のサーバー名を手で入れる (T28)。
 struct AddAccountSheet: View {
     @Environment(MailService.self) private var service
     @Environment(\.dismiss) private var dismiss
@@ -11,6 +12,9 @@ struct AddAccountSheet: View {
     @State private var displayName = ""
     @State private var senderName = ""
     @State private var choice: ProviderChoice = .automatic
+    @State private var imapHost = ""
+    @State private var smtpHost = ""
+    @State private var smtpPort = 465
     @State private var isWorking = false
     @State private var errorMessage: String?
 
@@ -35,6 +39,24 @@ struct AddAccountSheet: View {
                     Text("Yahoo!メール (Yahoo! JAPAN)").tag(ProviderChoice.yahooJapan)
                     Text("Yahoo! Mail (海外)").tag(ProviderChoice.yahoo)
                     Text("iCloud メール").tag(ProviderChoice.icloud)
+                    Text("その他 (サーバーを入れる)").tag(ProviderChoice.other)
+                }
+                if choice == .other {
+                    Section {
+                        TextField("受信サーバー (IMAP)", text: $imapHost, prompt: Text("例: mail.example.jp"))
+                            .accessibilityIdentifier("addAccount.imapHost")
+                        LabeledContent("受信のポート", value: "\(CustomServers.imapPort) (SSL/TLS)")
+                        TextField("送信サーバー (SMTP)", text: $smtpHost, prompt: Text("例: smtp.example.jp"))
+                            .accessibilityIdentifier("addAccount.smtpHost")
+                        Picker("送信のポート", selection: $smtpPort) {
+                            Text("465 (SSL/TLS)").tag(465)
+                            Text("587 (STARTTLS)").tag(587)
+                        }
+                    } footer: {
+                        Text("メールの契約先の「メールソフトの設定」の案内にある名前を入れてください。暗号化しない接続 (ポート 143 や 25) は使えません。")
+                            .font(.caption)
+                            .foregroundStyle(Palette.textSecondary)
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -65,7 +87,8 @@ struct AddAccountSheet: View {
                 Button("追加") { Task { await submit() } }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.glassProminent)
-                    .disabled(isWorking || email.isEmpty || password.isEmpty)
+                    .disabled(isWorking || email.isEmpty || password.isEmpty
+                        || (choice == .other && (imapHost.isEmpty || smtpHost.isEmpty)))
             }
         }
         .padding(24)
@@ -77,7 +100,8 @@ struct AddAccountSheet: View {
         errorMessage = nil
         do {
             try await service.addAccount(
-                email: email, password: password, displayName: displayName, senderName: senderName, choice: choice
+                email: email, password: password, displayName: displayName, senderName: senderName, choice: choice,
+                servers: choice == .other ? CustomServers(imapHost: imapHost, smtpHost: smtpHost, smtpPort: smtpPort) : nil
             )
             dismiss()
         } catch {

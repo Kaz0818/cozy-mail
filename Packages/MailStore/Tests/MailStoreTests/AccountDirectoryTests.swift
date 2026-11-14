@@ -310,3 +310,132 @@ private final class IDCounter: @unchecked Sendable {
         #expect(password == "secret")
     }
 }
+
+/// 送信用サーバーへのログインを確かめるための偽物 (T28)。
+private struct FakeSender: MailSendingSession {
+    func send(_ message: Data, from sender: String, to recipients: [String]) async throws {}
+    func close() async {}
+}
+
+/// 「その他」でサーバー名を手で入れる (T28、US-2)。独自ドメインのメール用。
+@Suite struct CustomServerTests {
+    private func servers(_ imap: String = "mail.example.jp", _ smtp: String = "smtp.example.jp", port: Int = 587) -> CustomServers {
+        CustomServers(imapHost: imap, smtpHost: smtp, smtpPort: port)
+    }
+
+    /// 入れたサーバー名は、前後の空白を取って小文字にする。受信は 993 (TLS)、送信は 465 (TLS) か 587 (STARTTLS)。
+    @Test func validServersAreAccepted() throws {
+        let (imap, smtp) = try servers("  Mail.Example.JP ", "smtp.example.jp", port: 465).validated()
+        #expect(imap == ServerSettings(host: "mail.example.jp", port: 993))
+        #expect(smtp == ServerSettings(host: "smtp.example.jp", port: 465))
+        #expect(try servers(port: 587).validated().1.port == 587)
+        #expect(try servers("192.168.1.10", "192.168.1.10").validated().0.host == "192.168.1.10")
+    }
+
+    /// 空・空白入り・「https://」付き・ポート付き・点のない名前は、つなぐ前に断る。
+    @Test func badServerNamesAreRejected() {
+        for bad in ["", "   ", "mail example.jp", "https://mail.example.jp", "mail.example.jp:993", "localhost",
+                    "mail..example.jp", ".example.jp", "mail.example.jp.", "-mail.example.jp", "メール.example.jp"] {
+            #expect(throws: AccountError.invalidServerName(.incoming), "受信: \(bad)") { try servers(bad).validated() }
+            #expect(throws: AccountError.invalidServerName(.outgoing), "送信: \(bad)") { try servers("mail.example.jp", bad).validated() }
+        }
+    }
+
+    /// 暗号化しないポート (25 など) は選べない。
+    @Test func unsupportedPortsAreRejected() {
+        for port in [25, 2525, 143, 0, 993] {
+            #expect(throws: AccountError.unsupportedPort(port)) { try servers(port: port).validated() }
+        }
+    }
+
+    /// 「その他」は、入れたサーバーで受信 (IMAP) と送信 (SMTP) の両方にログインできたら保存する。種類は「その他」。
+    @Test func addingWithCustomServersChecksBothLogins() async throws {
+        let spy = ConnectorSpy()
+        let senders = SenderAttempts()
+        let storage = InMemoryAccountListStorage()
+        let directory = AccountDirectory(
+            storage: storage, secrets: InMemorySecretStore(), connector: spy.connector,
+            senderConnector: { server, credentials in
+                senders.record(server, credentials)
+                return FakeSender()
+            },
+            makeID: { "acct-1" }
+        )
+        let account = try await directory.add(
+            email: "taro@my-shop.jp", password: " secret ", displayName: "お店", choice: .other,
+            servers: servers("mail.my-shop.jp", "smtp.my-shop.jp", port: 587)
+        )
+        #expect(account.provider == .other)
+        #expect(spy.attempts.first?.server == IMAPServer(host: "mail.my-shop.jp", port: 993))
+        let sender = try #require(senders.list.first)
+        #expect(sender.server == SMTPServer(host: "smtp.my-shop.jp", port: 587))
+        #expect(sender.server.security == .startTLS)
+        guard case let .password(username, password) = sender.credentials else {
+            Issue.record("expected password credentials")
+            return
+        }
+        #expect(username == "taro@my-shop.jp" && password == "secret")
+
+        let settings = try #require(try await directory.settings(for: account.id))
+        #expect(settings.imap == ServerSettings(host: "mail.my-shop.jp", port: 993))
+        #expect(settings.smtp == ServerSettings(host: "smtp.my-shop.jp", port: 587))
+        _ = try await directory.openSession(for: account.id)
+        #expect(spy.attempts.last?.server.host == "mail.my-shop.jp")
+    }
+
+    /// 入れ方が正しくなければ、どこにもつながず、何も保存しない。「その他」でサーバーがなければ断る。
+    @Test func badInputConnectsNowhere() async throws {
+        let spy = ConnectorSpy()
+        let senders = SenderAttempts()
+        let storage = InMemoryAccountListStorage()
+        let directory = AccountDirectory(
+            storage: storage, secrets: InMemorySecretStore(), connector: spy.connector,
+            senderConnector: { server, credentials in
+                senders.record(server, credentials)
+                return FakeSender()
+            }
+        )
+        await #expect(throws: AccountError.unsupportedPort(25)) {
+            _ = try await directory.add(email: "taro@my-shop.jp", password: "pw", displayName: "", choice: .other,
+                                        servers: servers(port: 25))
+        }
+        await #expect(throws: AccountError.invalidServerName(.incoming)) {
+            _ = try await directory.add(email: "taro@my-shop.jp", password: "pw", displayName: "", choice: .other)
+        }
+        #expect(spy.attempts.isEmpty && senders.list.isEmpty)
+        #expect(try storage.load() == nil)
+    }
+
+    /// 送信用サーバーにログインできなければ、保存しない (パスワードも残さない)。
+    @Test func failingToLogInToTheSendingServerSavesNothing() async throws {
+        let secrets = InMemorySecretStore()
+        let storage = InMemoryAccountListStorage()
+        for (failure, expected) in [
+            (SMTPError.authenticationFailed("535 bad"), AccountError.wrongPassword("535 bad")),
+            (SMTPError.encryptionUnavailable, AccountError.cannotConnect("送信サーバーが暗号化 (STARTTLS) に対応していません")),
+        ] {
+            let directory = AccountDirectory(
+                storage: storage, secrets: secrets, connector: ConnectorSpy().connector,
+                senderConnector: { _, _ in throw failure }, makeID: { "acct-1" }
+            )
+            await #expect(throws: expected) {
+                _ = try await directory.add(email: "taro@my-shop.jp", password: "pw", displayName: "", choice: .other,
+                                            servers: servers())
+            }
+        }
+        #expect(try storage.load() == nil)
+        #expect(try secrets.data(for: "password.acct-1") == nil)
+    }
+
+    /// 「その他」は自動では選ばれず、ほかの種類ではサーバー名を入れても使わない。
+    @Test func otherIsOnlyUsedWhenChosen() async throws {
+        #expect(ProviderChoice.other.resolve(email: "taro@my-shop.jp") == nil)
+        let spy = ConnectorSpy()
+        let directory = AccountDirectory(storage: InMemoryAccountListStorage(), secrets: InMemorySecretStore(),
+                                         connector: spy.connector, senderConnector: { _, _ in FakeSender() })
+        let account = try await directory.add(email: "me@gmail.com", password: "pw", displayName: "", choice: .automatic,
+                                               servers: servers())
+        #expect(account.provider == .gmail)
+        #expect(spy.attempts.first?.server.host == "imap.gmail.com")
+    }
+}

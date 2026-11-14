@@ -136,4 +136,14 @@ import Testing
         #expect(AccountError.unknownProvider.userMessage.contains("Google Workspace"))
         #expect(AccountError.alreadyAdded.userMessage.contains("すでに"))
     }
+
+    /// 手で入れたサーバー (T28) の間違いは、どの欄か・どう直すかを伝える。
+    @Test func serverMistakesSayWhichFieldAndHowToFix() {
+        let incoming = AccountError.invalidServerName(.incoming).userMessage
+        #expect(incoming.contains("受信サーバー") && incoming.contains("mail.example.jp"))
+        #expect(AccountError.invalidServerName(.outgoing).userMessage.contains("送信サーバー"))
+        let port = AccountError.unsupportedPort(25).userMessage
+        #expect(port.contains("25") && port.contains("465") && port.contains("587"))
+        #expect(AccountError.unknownProvider.userMessage.contains("その他"))
+    }
 }

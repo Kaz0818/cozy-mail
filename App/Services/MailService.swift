@@ -505,10 +505,12 @@ final class MailService {
 
     /// ログインを確かめてから追加し、そのアカウントを同期する。
     func addAccount(
-        email: String, password: String, displayName: String, senderName: String, choice: ProviderChoice
+        email: String, password: String, displayName: String, senderName: String, choice: ProviderChoice,
+        servers: CustomServers? = nil
     ) async throws(AccountError) {
         _ = try await directory.add(
-            email: email, password: password, displayName: displayName, senderName: senderName, choice: choice
+            email: email, password: password, displayName: displayName, senderName: senderName, choice: choice,
+            servers: servers
         )
         await reloadAccounts()
         await syncAll()
@@ -636,9 +638,13 @@ extension AccountError {
         case .emptyPassword:
             "アプリパスワードを入力してください。"
         case .unknownProvider:
-            "このアドレスのメールの種類が分かりません。「メールの種類」を選んでください (会社の Google Workspace は「Gmail」)。"
+            "このアドレスのメールの種類が分かりません。「メールの種類」を選んでください (会社の Google Workspace は「Gmail」、独自ドメインなどは「その他」でサーバーを入れます)。"
         case .alreadyAdded:
             "このアドレスは、すでに追加されています。"
+        case let .invalidServerName(role):
+            "\(role == .incoming ? "受信サーバー" : "送信サーバー")の名前の形が正しくありません。メールの契約先の案内にある名前 (例: mail.example.jp) を、「https://」やポート番号を付けずに入れてください。"
+        case let .unsupportedPort(port):
+            "送信サーバーのポート \(port) は使えません。暗号化して送るため、465 か 587 を選んでください。"
         case let .wrongPassword(reason):
             "ログインできませんでした。ふだんのパスワードではなく、アプリパスワードを使っているか確認してください。(サーバーの応答: \(reason))"
         case let .cannotConnect(reason):
