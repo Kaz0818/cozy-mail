@@ -713,6 +713,9 @@
 > - テスト: `IMAPDraftCommandsTests` 6 件 (MailCore)、`ServerDraftsTests` 7 件・`DraftStoreTests` +1・`DraftsMergingRepositoryTests` +1 (MailStore)、`DraftAutosaveTests` +3・`ServerDraftCoordinationTests` 9 件 (アプリ)。
 >   わざと壊して、テストが気付くことも確かめた (Message-ID のちょうど同じかの確かめを外す、置き終わるのを待たずに消す)。
 > - □ のまま: 受け入れ条件と 🍎 は、本物のサーバーでは確かめていない (テストで本物のアカウントは使わない決まりのため)。
+> - **直した (2026-11-15)**: オーナーが試すと、Gmail の Web 版に下書きが出なかった。Gmail の同期は「すべてのメール」などしか見ないため、
+>   下書きフォルダ (`[Gmail]/Drafts`) の名前を覚えておらず、置く直前に止まっていた (テストが Yahoo! 型のサーバーだけだった)。
+>   `SyncEngine.sync` で Gmail の下書きフォルダの名前だけ覚えるようにし (中身は同期しない)、Gmail 型のテスト `gmailDraftsGoToTheGmailDraftsFolder` を足した。直したあとは、まだ本物の Gmail で試していない。
 > - **決めたこと (あとから変えられる):** サーバーに置くのは閉じたときだけ (Gmail の IMAP で置ける量は 1 日 500 MB で、打つたびに添付ごと置き直すと届くおそれがあるため)。
 > - 分かっている限り: アプリを開き直したあとに差出人を変えると、前のアカウントの写しが残る。書いている間 (閉じる前) は、下書きフォルダに古いサーバーの写しが並んで出ることがある。
 >   Gmail の Web 版で書き直した中身は、Mac には取り込まない (別の下書きとして出る)。Gmail は消した下書きをごみ箱に移すことがある。
