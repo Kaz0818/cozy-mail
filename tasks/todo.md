@@ -463,11 +463,11 @@
 
 **確認:**
 - [x] 🐧 `DockBadgeTests` (0・見本・負の数・999+) と、`InboxModel` の `dockBadgeLabel` のテスト
-- [ ] 🍎 Dock に未読数が出て、読むと減る。全部読むと消える
+- [x] 🍎 Dock に未読数が出て、読むと減る。全部読むと消える (2026-11-14 オーナーが Mac で確認)
 
 > 状態 (2026-11-14): 🐧 済み。`DockBadge.label(unreadCount:isShowingSamples:)` (MailStore、Linux でもテスト可) で文字を決め、`InboxModel.dockBadgeLabel` が `unifiedUnreadCount` を渡す。`MainWindow` が `onChange` で `NSApplication.dockTile.badgeLabel` に付ける。
 > - 決めたこと (あとから変えられる): 1000 以上は「999+」。ウィンドウをすべて閉じても、最後の数が残る (T20 のバックグラウンド同期のときに見直す)。
-> - 🍎 は「オーナーの確認待ち」へ (docs/handoff.md)。
+> - ✅ 2026-11-14 オーナーが Mac で確認。
 
 **依存:** T15
 **触るファイル:** `Packages/MailStore/Sources/MailStore/DockBadge.swift`、`Tests/MailStoreTests/DockBadgeTests.swift`、`App/Features/Inbox/InboxModel.swift`、`App/Features/Inbox/MainWindow.swift`、`AppTests/InboxModelTests.swift`
@@ -486,18 +486,18 @@
 
 **確認:**
 - [x] 🐧 一時ファイルの書き出し (ファイル名、中身、危ない名前、取得の失敗) のテスト
-- [ ] 🍎 添付を Finder にドラッグすると保存され、中身が正しい
+- [x] 🍎 添付を Finder にドラッグすると保存され、中身が正しい (2026-11-14 オーナーが Mac で確認)
 
 > 状態 (2026-11-14): 🐧 済み (`AttachmentDragTests` 5 件)。`DraggableAttachment` (`Transferable`、`FileRepresentation`) が、Finder に落とされたときに中身を取り、一時フォルダ/<UUID>/元の名前 に書いて渡す。ドラッグを始めただけでは通信しない。名前は `SafeHTML.safeFileName` で整える。取れなかったときは、既存の保存ボタンと同じエラーを出す。
 > - 決めたこと (あとから変えられる): 種類は `.data` (どの種類のファイルも渡せる)。カード全体がドラッグできる (ボタンと Quick Look のダブルクリックはそのまま)。
-> - 「Finder に実際に落として保存される」は Mac の画面操作が要るので 🍎 (オーナーの確認待ち)。ローカルの UI テストの実行は画面操作の許可がなくて止まったので、UI テストは CI の macOS で確かめる。
+> - ✅ 2026-11-14 オーナーが Mac で、Finder に落として保存されることを確認。ローカルの UI テストの実行は画面操作の許可がなくて止まったので、UI テストは CI の macOS で確かめる。
 
 **依存:** T14
 **触るファイル:** `App/Features/Reader/AttachmentDrag.swift` (新規)、`App/Features/Reader/ReaderView.swift`、`AppTests/AttachmentDragTests.swift`
 **大きさ:** S
 
 ### ✅ チェックポイント v0.1
-- [ ] 🍎 SPEC の P0 のユーザーストーリー (US-1〜US-11) の受け入れ条件を、実際の 4 アカウントで確認する — 作ったものは 2026-11-14 にオーナーが確認。残り: Dock の未読数 (T30) と添付のドラッグ (T31) は v0.1 に入れると決めた (2026-11-14)。本文全体の検索 (US-10) はあとで Mac で行う。Yahoo!
+- [ ] 🍎 SPEC の P0 のユーザーストーリー (US-1〜US-11) の受け入れ条件を、実際の 4 アカウントで確認する — 作ったものは 2026-11-14 にオーナーが確認。Dock の未読数 (T30) と添付のドラッグ (T31) は v0.1 に入れると決め、作ってオーナーが確認した (2026-11-14)。残り: 本文全体の検索 (US-10) はあとで Mac で行う。Yahoo!
 - [x] 🍎 `docs/manual-test.md` の手順をすべて通す (2026-11-14 オーナーが Mac で確認。Yahoo! の手順は除く)
 - [x] 🐧 すべてのパッケージのテストが通る (CI で通過)
 - [ ] **オーナーと確認して、フェーズ 4 を細かく決め直す**
