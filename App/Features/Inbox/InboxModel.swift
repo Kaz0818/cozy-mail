@@ -336,6 +336,8 @@ final class InboxModel {
     /// その操作が、いまのメールにできるか (できないボタンは押せないようにする)。
     func canPerform(_ action: MessageAction, on message: MessageSummary?) -> Bool {
         guard !isShowingSamples, let message else { return false }
+        // Mac に保存した下書き (T23a) は「削除」(下書きを消す) だけ
+        if LocalDraft.id(from: message.id) != nil { return action == .moveToTrash }
         switch action {
         case .markRead: return !message.isRead
         case .markUnread: return message.isRead

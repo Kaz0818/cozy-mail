@@ -17,10 +17,16 @@ struct ComposeRequest: Codable, Hashable {
     var messageID: String?
     /// 送信を取り消した・送れなかったメールを開き直すとき、`MailService` が預かっている下書きの番号 (T24)。
     var restoredDraftID: UUID?
+    /// 下書きフォルダから開くとき、Mac に保存した下書きの番号 (T23a)。
+    var localDraftID: UUID?
     var id = UUID()
 
     static func new() -> ComposeRequest {
         ComposeRequest(kind: .new)
+    }
+
+    static func editingDraft(_ draftID: UUID) -> ComposeRequest {
+        ComposeRequest(kind: .new, localDraftID: draftID)
     }
 
     static func restoring(_ draftID: UUID) -> ComposeRequest {
@@ -79,13 +85,92 @@ final class ComposeModel {
     /// 送信を取り消せるよう、送るのを預ける先 (T24)。預けたら true。false (0 秒の設定など) なら、ここですぐ送る。
     private let sendLater: (@MainActor (Draft) async -> Bool)?
 
+    /// 下書きの保存先 (T23a)。nil なら保存しない。
+    private let drafts: DraftStore?
+    /// 打つのをやめてから保存するまでの時間。
+    private let autosaveDelay: Duration
+    /// 下書きを保存した・消したときに呼ぶ (下書きフォルダを読み直してもらう)。
+    private let onDraftsChanged: (@MainActor () -> Void)?
+    /// この作成ウィンドウの下書きの番号。下書きフォルダから開いたときは、その下書きの番号。
+    private(set) var draftID = UUID()
+    /// 最後に保存した (または開いたときの) 中身。これと同じなら保存しない。
+    private var savedContent: DraftContent?
+    /// 下書きを保存したことがあるか (送ったとき・捨てたときに消すため)。
+    private var hasStoredDraft = false
+    /// 送った・捨てたあとは、もう保存しない。
+    private var isFinished = false
+    private var autosaveTask: Task<Void, Never>?
+
     init(
         repository: any MailRepository, signatures: SignatureStore? = nil,
-        sendLater: (@MainActor (Draft) async -> Bool)? = nil
+        sendLater: (@MainActor (Draft) async -> Bool)? = nil,
+        drafts: DraftStore? = nil, autosaveDelay: Duration = .seconds(2),
+        onDraftsChanged: (@MainActor () -> Void)? = nil
     ) {
         self.repository = repository
         self.signatures = signatures
         self.sendLater = sendLater
+        self.drafts = drafts
+        self.autosaveDelay = autosaveDelay
+        self.onDraftsChanged = onDraftsChanged
+    }
+
+    // MARK: - 下書き (T23a)
+
+    /// いまの中身 (宛先は打った文字のまま)。
+    var content: DraftContent {
+        DraftContent(
+            accountID: accountID, to: to, cc: cc, bcc: bcc, subject: subject, body: body,
+            attachments: attachments, inReplyTo: inReplyTo, references: references, quote: quote
+        )
+    }
+
+    /// 中身が変わった。打つのをやめて `autosaveDelay` たったら保存する。
+    func contentChanged() {
+        guard !isLoading, !isFinished, drafts != nil else { return }
+        autosaveTask?.cancel()
+        let delay = autosaveDelay
+        autosaveTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            await self?.saveDraft()
+        }
+    }
+
+    /// 開いたときから変わっていれば、いま保存する。
+    func saveDraft() async {
+        guard let drafts, !isFinished, !isLoading else { return }
+        let current = content
+        guard current != savedContent else { return }
+        do {
+            try await drafts.save(current, id: draftID)
+            savedContent = current
+            hasStoredDraft = true
+            onDraftsChanged?()
+        } catch {
+            errorMessage = "下書きを保存できませんでした: \(error.localizedDescription)"
+        }
+    }
+
+    /// ウィンドウを閉じるとき: 書きかけなら待たずに保存する。
+    func closing() async {
+        autosaveTask?.cancel()
+        await saveDraft()
+    }
+
+    /// 「下書きを捨てる」。保存した下書きを消し、もう保存しない。
+    func discardDraft() async {
+        await finishDraft()
+    }
+
+    /// 送った・捨てたとき: 自動保存をやめ、保存した下書きを消す。
+    private func finishDraft() async {
+        isFinished = true
+        autosaveTask?.cancel()
+        guard let drafts, hasStoredDraft else { return }
+        try? await drafts.delete(draftID)
+        hasStoredDraft = false
+        onDraftsChanged?()
     }
 
     private func signature(for id: AccountID?) -> String {
@@ -99,6 +184,16 @@ final class ComposeModel {
         defer { isLoading = false }
         accounts = (try? await repository.accounts()) ?? []
         let fallback = defaultAccount ?? accounts.first?.id
+        // 開いたときの中身を「保存済み」とみなす。ただし取り消した・送れなかったメールは、閉じたら下書きに残す
+        defer { savedContent = restored == nil ? content : nil }
+        // 下書きフォルダから開いた (T23a): 保存した中身をそのまま入れ、同じ下書きに上書きしていく
+        if let localID = request.localDraftID, let saved = await drafts?.draft(localID) {
+            signatureTexts = await signatures?.all() ?? [:]
+            draftID = localID
+            hasStoredDraft = true
+            fill(from: saved.content, fallbackAccount: fallback)
+            return
+        }
         if let restored {
             signatureTexts = await signatures?.all() ?? [:]
             fill(from: restored, fallbackAccount: fallback)
@@ -119,6 +214,15 @@ final class ComposeModel {
             signature: signature(for: sender)
         )
         fill(from: draft, fallbackAccount: fallback)
+    }
+
+    /// 保存した下書きの中身を欄に入れる (宛先は打った文字のまま)。
+    private func fill(from saved: DraftContent, fallbackAccount fallback: AccountID?) {
+        fill(from: saved.draft, fallbackAccount: fallback)
+        to = saved.to
+        cc = saved.cc
+        bcc = saved.bcc
+        showsCcAndBcc = !saved.cc.isEmpty || !saved.bcc.isEmpty
     }
 
     /// 下書きの中身を欄に入れる (読み込み中に呼ぶので、差出人を入れても署名は入れ替えない)。
@@ -173,10 +277,12 @@ final class ComposeModel {
         // 取り消せるよう預けたら、もう送ったものとしてウィンドウを閉じる
         if let sendLater, await sendLater(draft) {
             outcome = .sent
+            await finishDraft()
             return
         }
         do {
             outcome = try await repository.send(draft)
+            await finishDraft()
         } catch {
             errorMessage = Self.describe(error)
         }

@@ -13,7 +13,7 @@ struct ComposeWindow: View {
     var body: some View {
         Group {
             if let model {
-                ComposeForm(model: model, onFinished: finish)
+                ComposeForm(model: model, onFinished: finish, onDiscard: { dismiss() })
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -22,11 +22,18 @@ struct ComposeWindow: View {
         .frame(minWidth: 560, minHeight: 480)
         .background(AppBackground())
         .navigationTitle(model?.windowTitle ?? "新規メッセージ")
+        // 閉じたら、書きかけを待たずに下書きに保存する
+        .onDisappear {
+            guard let model else { return }
+            Task { await model.closing() }
+        }
         .task {
             let service = service
             let model = ComposeModel(
                 repository: service.repository, signatures: service.signatures,
-                sendLater: { await service.sendLater($0) }
+                sendLater: { await service.sendLater($0) },
+                // 書きかけは Mac に自動で保存する (T23a)
+                drafts: service.drafts, onDraftsChanged: { service.draftsChanged() }
             )
             self.model = model
             // 取り消した・送れなかったメールなら、その中身で開く (T24)
@@ -45,6 +52,7 @@ struct ComposeWindow: View {
 private struct ComposeForm: View {
     @Bindable var model: ComposeModel
     let onFinished: () -> Void
+    let onDiscard: () -> Void
     @State private var isImporting = false
     @State private var importError: String?
     @FocusState private var focus: Field?
@@ -102,6 +110,8 @@ private struct ComposeForm: View {
                 Text("相手には届いていますが、このアカウントの「送信済み」フォルダに残せませんでした。")
             }
         )
+        // 打つたびに、少し待ってから下書きに保存する (T23a)
+        .onChange(of: model.content) { model.contentChanged() }
         .onChange(of: model.outcome) { _, outcome in
             if outcome == .sent { onFinished() }
         }
@@ -130,6 +140,22 @@ private struct ComposeForm: View {
                 .fixedSize()
                 .accessibilityIdentifier("compose.from")
                 Spacer()
+                Button {
+                    Task {
+                        await model.discardDraft()
+                        onDiscard()
+                    }
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.title3)
+                        .frame(width: 40, height: 36)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.textPrimary)
+                .glassCapsule()
+                .help(Text("下書きを捨てて閉じる"))
+                .accessibilityLabel(Text("下書きを捨てる"))
+                .accessibilityIdentifier("compose.discard")
                 Button {
                     isImporting = true
                 } label: {
