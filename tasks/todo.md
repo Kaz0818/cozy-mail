@@ -465,7 +465,7 @@
 - [x] 🐧 `DockBadgeTests` (0・見本・負の数・999+) と、`InboxModel` の `dockBadgeLabel` のテスト
 - [x] 🍎 Dock に未読数が出て、読むと減る。全部読むと消える (2026-11-14 オーナーが Mac で確認)
 
-> 状態 (2026-11-14): 🐧 済み。`DockBadge.label(unreadCount:isShowingSamples:)` (MailStore、Linux でもテスト可) で文字を決め、`InboxModel.dockBadgeLabel` が `unifiedUnreadCount` を渡す。`MainWindow` が `onChange` で `NSApplication.dockTile.badgeLabel` に付ける。
+> 状態 (2026-11-14): 🐧 済み。`DockBadge.label(unreadCount:isShowingSamples:)` (MailStore、Linux でもテスト可) で文字を決め、`InboxModel.dockBadgeLabel` が `unifiedUnreadCount` を渡す。`MainWindow` が `onChange` で `NSApplication.dockTile.badgeLabel` に付ける。(T21 で、付けるのはメニューバーの `MenuBarModel` に移した)
 > - 決めたこと (あとから変えられる): 1000 以上は「999+」。ウィンドウをすべて閉じても、最後の数が残る (T20 のバックグラウンド同期のときに見直す)。
 > - ✅ 2026-11-14 オーナーが Mac で確認。
 
@@ -560,7 +560,7 @@
 > - テスト: `NewInboxMailTests` 3 件・`NewMailNotifierTests` 7 件 (MailStore)、`MailServiceNotificationTests` 4 件・`InboxModelOpenFromNotificationTests` 2 件 (アプリ)。
 > - □ のまま: 「通知が実際に Mac に出る」「押すとそのメールが開く」は、本物の新着が要るので Claude は確かめていない (中身を決める部分と、開く部分はテスト済み)。
 > - 決めたこと (あとから変えられる): アプリが前にあっても通知を出す。起動直後の最初の一斉の同期では出さない。4 通以上は「n 件の新着メール」に (差出人を 3 人まで)。通知センターではアカウントごとにまとめる。
-> - 分かっている限界: メインウィンドウを閉じているときに通知を押すと、アプリは前に出るが、ウィンドウは開かない (T21 でメニューバー常駐と一緒に直す)。
+> - メインウィンドウを閉じているときに通知を押してもウィンドウが開かなかった点は、T21 で直した。
 
 **依存:** T20a
 **触るファイル:** `Packages/MailStore/Sources/MailStore/NewMailNotifier.swift`、`App/Services/NotificationService.swift` (新規、`UserNotifications`)、`App/Features/Settings/`、テスト
@@ -571,14 +571,21 @@
 **説明:** メニューバーにアイコンを置き (`MenuBarExtra`)、未読数と最近の未読メールを出す。メインウィンドウを閉じてもアプリは終わらず、受け取り続ける。設定で「ログイン時に起動」を選べる (`SMAppService.mainApp`)。
 
 **受け入れ条件:**
-- [ ] メニューバーに未読数が出る (Dock と同じ数)
+- [x] メニューバーに未読数が出る (Dock と同じ数)
 - [ ] メニューから、最近の未読メール (5 通まで) を選ぶとメインウィンドウでそのメールが開く。「新着メールを受信」「Cozy Mail を開く」「終了」がある
 - [ ] ウィンドウを閉じてもアプリは終わらず、新着の通知が出る (US-12)
 - [ ] 設定で「ログイン時に起動」を選べ、今の状態が出る
 
 **確認:**
-- [ ] 🐧 メニューに出す中身 (未読数・最近の未読) を決める部分のテスト
+- [x] 🐧 メニューに出す中身 (未読数・最近の未読) を決める部分のテスト
 - [ ] 🍎 ウィンドウを閉じて、メニューバーから開ける。ログイン時の起動の切り替え
+
+> 状態 (2026-11-14): 🐧 済み。`MenuBarSummary` (MailStore) が未読数と最近の未読 5 通を決め、アプリの `MenuBarModel` が読み直す。`MenuBarExtra` に封筒と未読数、メニューに未読メール・「新着メールを受信」・「Cozy Mail を開く」・「設定…」・「Cozy Mail を終了」。設定に「一般」タブ (ログイン時に開く、`SMAppService.mainApp`)。
+> - Dock の未読数 (T30) は、メインウィンドウの `InboxModel` からメニューバーの `MenuBarModel` に移した (ウィンドウを閉じても数が古くならないように)。テストも `MenuBarModelTests` に移した。
+> - 通知やメニューから開くメールは、`MailService.takePendingOpen()` でウィンドウが 1 回だけ受け取る。ウィンドウが閉じていたら、メニューバーのアイコンの側から開く (T20b の「閉じているとウィンドウが開かない」を直した)。
+> - テスト: `MenuBarSummaryTests` 4 件 (MailStore)、`MenuBarModelTests` 3 件・`LoginItemSettingsTests` 2 件・`OpenRequestTests` 2 件 (アプリ)。
+> - □ のまま: メニューから選んでそのメールが開くこと、ウィンドウを閉じても通知が出ること、実際のログイン項目の登録は、画面で Claude が確かめていない。
+> - 決めたこと (あとから変えられる): メニューバーのアイコンはいつも出す (消す設定はまだない)。Dock のアイコンも残す。
 
 **依存:** T20b
 **触るファイル:** `App/CozyMailApp.swift`、`App/Features/MenuBar/` (新規)、`App/Features/Settings/`、テスト

@@ -9,6 +9,8 @@ struct CozyMailApp: App {
     @AppStorage(AppTheme.storageKey) private var themeRawValue = AppTheme.system.rawValue
     /// 自動テストでは、本物のアカウント・キーチェーン・保存ファイルに触れないよう、メモリ上だけで動かす。
     @State private var service = isAutomatedTest(ProcessInfo.processInfo) ? MailService.preview() : MailService.live()
+    /// メニューバーの中身と Dock の未読数 (T21、T30)。
+    @State private var menuBar = MenuBarModel()
 
     /// 自動テストで起動されたかどうか。
     /// - 画面のテスト: `-ui-testing` を付けて起動する。
@@ -52,8 +54,18 @@ struct CozyMailApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 760, height: 640)
 
+        // メニューバーに常駐する (T21)。ウィンドウを閉じても、アプリは終わらずに新着を受け取る
+        MenuBarExtra {
+            MenuBarContent(model: menuBar, service: service)
+        } label: {
+            MenuBarLabel(model: menuBar, service: service)
+        }
+
         Settings {
             TabView {
+                Tab("一般", systemImage: "gearshape") {
+                    GeneralSettings()
+                }
                 Tab("アカウント", systemImage: "at") {
                     AccountsSettings()
                 }
