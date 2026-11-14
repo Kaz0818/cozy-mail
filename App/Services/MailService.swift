@@ -60,7 +60,10 @@ final class MailService {
         let directory = directory
         return LiveMailRepository(
             store: store,
-            accounts: { try await directory.accounts() },
+            // アカウントは、このアプリが読み込み済みの最新の一覧を使う。`directory` に聞きに行くと、受信がキーチェーンの確認
+            // (「キーチェーンを使おうとしています」) で止まっている間、その後ろで待たされて一覧が出なくなるため。
+            // 写しではなく毎回読むので、作成ウィンドウを開いたあとに差出人の名前を変えても、新しい名前で送る。
+            accounts: { [weak self] in await self?.accounts ?? [] },
             // 本文の取得と整理の操作は、そのたびにサーバーにつなぎ、終わったら閉じる
             openSession: { accountID in try await directory.openSession(for: accountID) },
             // 送信も、そのたびに送信用のサーバーにつなぎ、送ったら閉じる
