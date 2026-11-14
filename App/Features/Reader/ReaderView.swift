@@ -151,8 +151,22 @@ private struct MessageContent: View {
             AttachmentCard(
                 attachment: attachment,
                 onPreview: { Task { await preview(attachment) } },
-                onSave: { Task { await save(attachment) } }
+                onSave: { Task { await save(attachment) } },
+                dragItem: dragItem(for: attachment)
             )
+        }
+    }
+
+    /// Finder へドラッグしたときに、中身を取ってファイルを渡す形 (T31)。取れなかったときはエラーを出す。
+    private func dragItem(for attachment: Attachment) -> DraggableAttachment {
+        let model = model
+        return DraggableAttachment(filename: attachment.filename) {
+            do {
+                return try await model.attachmentData(attachment)
+            } catch {
+                await MainActor.run { attachmentError = "添付ファイルを保存できませんでした。(\(error.localizedDescription))" }
+                throw error
+            }
         }
     }
 
@@ -272,6 +286,8 @@ private struct AttachmentCard: View {
     let attachment: Attachment
     let onPreview: () -> Void
     let onSave: () -> Void
+    /// カード全体を Finder へドラッグして保存できる (T31)。
+    let dragItem: DraggableAttachment
 
     var body: some View {
         HStack(spacing: 14) {
@@ -309,6 +325,7 @@ private struct AttachmentCard: View {
         .frame(minWidth: 320, maxWidth: 520)
         .glassCard()
         .onTapGesture(count: 2, perform: onPreview)
+        .draggable(dragItem)
     }
 }
 
