@@ -37,6 +37,20 @@ struct MainWindow: View {
                 .padding(.bottom, Metrics.panelGap + 16)
         }
         .modifier(SendNoticeAlert())
+        // 受信トレイをすべて既読にする前に確かめる (たくさんのメールが一度に変わり、まとめては戻せないため)
+        .alert(
+            "受信トレイをすべて既読にしますか？",
+            isPresented: Binding(
+                get: { model.markInboxReadRequest != nil },
+                set: { if !$0 { model.cancelMarkInboxRead() } }
+            ),
+            presenting: model.markInboxReadRequest
+        ) { request in
+            Button("既読にする") { Task { await model.markInboxRead(account: request.accountID) } }
+            Button("キャンセル", role: .cancel) { model.cancelMarkInboxRead() }
+        } message: { request in
+            Text("\(request.scope)の受信トレイにある未読 \(request.unreadCount) 通を、すべて既読にします。Mac に保存していない古いメールも既読になり、Gmail の Web 版などにも反映されます。")
+        }
         // メニューバーの「メッセージ」メニューが、このウィンドウのメールに対して動くように
         .focusedSceneValue(\.inboxModel, model)
         .task { await service.start() }

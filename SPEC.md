@@ -53,6 +53,7 @@
 | US-15 | 送ったあとで取り消したい | 送信後、設定した秒数 (5〜30 秒) は取り消せる | P1 |
 | US-16 | アカウントごとに署名を使いたい | 新規作成・返信のときに、差出人アカウントの署名が自動で入る | P1 |
 | US-17 | 複数のメールをまとめて操作したい | `⌘` / `⇧` + クリックで複数選んで、まとめて既読・アーカイブ・削除・移動できる | P1 |
+| US-18 | 受信トレイの未読を一度に片付けたい | 「受信トレイをすべて既読にする」で、確かめたあと、Mac に保存していない古い未読も含めて既読になり、未読数が 0 になる (2026-11-15 オーナーの依頼) | P1 |
 
 ### やらないこと
 
@@ -271,7 +272,7 @@ public actor IMAPSession {
 | `mail-protocol` | IMAP (IDLE を含む) / SMTP の接続、MIME の解析と生成 (`Packages/MailCore`) | — | (土台) |
 | `account-auth` | アカウントの追加と削除、Google OAuth、アプリパスワード、キーチェーン、事業者ごとのサーバー設定 | `mail-protocol` | US-1, US-2 |
 | `mail-store` | Mac 内の保存、同期、オフラインの待ち行列、未読数 | `mail-protocol`, `account-auth` | US-9, US-13 |
-| `mail-ui` | サイドバー、統合受信トレイ、一覧、本文表示、整理の操作、キーボード操作 | `mail-store`, `design-system` | US-3, US-4, US-5, US-7, US-8, US-17 |
+| `mail-ui` | サイドバー、統合受信トレイ、一覧、本文表示、整理の操作、キーボード操作 | `mail-store`, `design-system` | US-3, US-4, US-5, US-7, US-8, US-17, US-18 |
 | `compose` | 新規作成、返信、転送、添付、下書き、署名、送信取り消し | `mail-store`, `design-system` | US-6, US-14, US-15, US-16 |
 | `search` | Mac 内の全文検索、サーバー側検索 | `mail-store` | US-10 |
 | `notifications` | 新着の通知、Dock とメニューバーの未読数、メニューバー常駐、ログイン時の起動 | `mail-store` | US-12 |

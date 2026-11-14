@@ -52,6 +52,7 @@ struct SidebarView: View {
                 ) {
                     Task { await model.select(.account(item.id, .inbox)) }
                 }
+                .contextMenu { markInboxReadItem(account: item.id, unread: item.unreadCount) }
             }
             SidebarRow(
                 title: "統合受信トレイ",
@@ -62,6 +63,7 @@ struct SidebarView: View {
             ) {
                 Task { await model.select(.unified(.inbox)) }
             }
+            .contextMenu { markInboxReadItem(account: nil, unread: model.unifiedUnreadCount) }
             .padding(.top, 6)
         }
     }
@@ -79,8 +81,20 @@ struct SidebarView: View {
                 ) {
                     Task { await model.select(selection) }
                 }
+                .contextMenu {
+                    if folder.role == .inbox || folder.role == .unread {
+                        markInboxReadItem(account: model.selection.accountID, unread: folder.badge)
+                    }
+                }
             }
         }
+    }
+
+    /// 右クリックの「受信トレイをすべて既読にする」(確かめのダイアログを出す)。`account` が nil ならすべてのアカウント。
+    @ViewBuilder
+    private func markInboxReadItem(account: AccountID?, unread: Int) -> some View {
+        Button("受信トレイをすべて既読にする…") { model.askToMarkInboxRead(account: .some(account)) }
+            .disabled(unread == 0 || model.isShowingSamples)
     }
 
     /// アカウントを選んでいる間だけ出す、そのアカウントの Gmail のラベル (T13)。

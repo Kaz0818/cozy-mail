@@ -35,6 +35,8 @@ public protocol MailServerSession: Sendable {
     func supportsUIDPlus() async throws -> Bool
     /// 指定したメールだけを消す (`UID EXPUNGE`、T23b)。UIDPLUS がなければ何もせずに断る。
     func deleteMessages(uids: [UInt32], in mailbox: String) async throws
+    /// まだ読んでいないメールの UID (`UID SEARCH UNSEEN`。受信トレイをすべて既読にするため)。
+    func searchUnreadUIDs(in mailbox: String) async throws -> [UInt32]
 }
 
 extension MailServerSession {
@@ -55,6 +57,11 @@ extension MailServerSession {
 
     public func deleteMessages(uids: [UInt32], in mailbox: String) async throws {
         throw IMAPError.unsupported("UIDPLUS")
+    }
+
+    /// 未読を探せない接続 (テストの偽物など) は、断る (黙って「0 件」にすると、既読にできたように見えるため)。
+    public func searchUnreadUIDs(in mailbox: String) async throws -> [UInt32] {
+        throw IMAPError.unsupported("SEARCH UNSEEN")
     }
 }
 

@@ -125,6 +125,12 @@ actor FakeMailServer: MailServerSession {
         }.map(\.uid).sorted()
     }
 
+    /// 受信トレイをすべて既読にする: `\\Seen` の印がないメール。
+    func searchUnreadUIDs(in mailbox: String) async throws -> [UInt32] {
+        calls.append("SEARCH UNSEEN \(mailbox)")
+        return try folder(mailbox).messages.filter { !$0.flags.contains("\\Seen") }.map(\.uid).sorted()
+    }
+
     /// true にすると、次の書き込み (フラグ・ラベル・移動) が失敗する。
     private(set) var failNextWrite = false
 

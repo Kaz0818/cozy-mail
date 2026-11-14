@@ -272,6 +272,10 @@ public struct DraftsMergingRepository: MailRepository {
         try await base.searchServer(text)
     }
 
+    public func markInboxRead(account: AccountID?) async throws -> Int {
+        try await base.markInboxRead(account: account)
+    }
+
     public func body(for id: MessageID) async throws -> MessageBody {
         guard let draftID = LocalDraft.id(from: id) else { return try await base.body(for: id) }
         guard let saved = await drafts.draft(draftID) else { throw MailRepositoryError.messageNotFound(id) }

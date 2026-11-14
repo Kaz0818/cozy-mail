@@ -400,6 +400,58 @@ final class InboxModel {
         }
     }
 
+    // MARK: - 受信トレイをすべて既読にする
+
+    /// 確かめのダイアログに出す中身。`accountID` が nil なら、すべてのアカウント。
+    struct MarkInboxReadRequest: Equatable {
+        let accountID: AccountID?
+        /// 「すべてのアカウント」か、アカウントの名前。
+        let scope: String
+        /// サーバーに聞いた受信トレイの未読数 (Mac に保存していない古いメールも入る)。
+        let unreadCount: Int
+    }
+
+    /// 出している確かめのダイアログ (nil なら出していない)。
+    private(set) var markInboxReadRequest: MarkInboxReadRequest?
+
+    /// 受信トレイをすべて既読にする対象 (アカウントを選んでいればそのアカウント、統合ならすべて) の未読数。
+    private func inboxUnread(for accountID: AccountID?) -> Int {
+        guard let accountID else { return unifiedUnreadCount }
+        return accounts.first { $0.id == accountID }?.unreadCount ?? 0
+    }
+
+    /// メニューの「受信トレイをすべて既読にする」を押せるか。
+    var canMarkInboxRead: Bool {
+        !isShowingSamples && inboxUnread(for: selection.accountID) > 0
+    }
+
+    /// 確かめのダイアログを出す。`account` を省くと、いま選んでいるアカウント (統合ならすべて)。
+    func askToMarkInboxRead(account: AccountID?? = nil) {
+        let accountID = account ?? selection.accountID
+        let count = inboxUnread(for: accountID)
+        guard !isShowingSamples, count > 0 else { return }
+        let scope = accountID.flatMap { id in accounts.first { $0.id == id }?.account.displayName } ?? "すべてのアカウント"
+        markInboxReadRequest = MarkInboxReadRequest(accountID: accountID, scope: scope, unreadCount: count)
+    }
+
+    func cancelMarkInboxRead() {
+        markInboxReadRequest = nil
+    }
+
+    /// 受信トレイをすべて既読にする (確かめたあと)。Mac に保存していない古い未読も、サーバーで既読にする。
+    func markInboxRead(account accountID: AccountID?) async {
+        markInboxReadRequest = nil
+        guard !isShowingSamples else { return }
+        actionError = nil
+        do {
+            _ = try await repository.markInboxRead(account: accountID)
+        } catch {
+            actionError = Self.describe(error, doing: "受信トレイを既読に")
+        }
+        // うまくいかなかったアカウントがあっても、変わった分を出す
+        await load()
+    }
+
     /// その操作が、いまのメールにできるか (できないボタンは押せないようにする)。
     func canPerform(_ action: MessageAction, on message: MessageSummary?) -> Bool {
         guard !isShowingSamples, let message else { return false }

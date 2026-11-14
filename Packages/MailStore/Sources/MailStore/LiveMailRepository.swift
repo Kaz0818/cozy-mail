@@ -253,6 +253,50 @@ public struct LiveMailRepository: MailRepository {
         }
     }
 
+    // MARK: - 受信トレイをすべて既読にする
+
+    /// 1 回の `UID STORE` で送る数 (命令が長くなりすぎないように)。
+    static let markReadChunkSize = 500
+
+    /// 受信トレイをすべて既読にする。Mac に保存していない古い未読も、サーバーで探して既読にする。
+    /// 先にサーバーを変え、うまくいったアカウントだけ Mac の保存先を合わせる (断られたら、Mac は未読のまま)。
+    /// つながらないアカウントがあっても、ほかは続けて、最後に最初の失敗を投げる。
+    public func markInboxRead(account accountID: AccountID?) async throws -> Int {
+        guard let openSession else { throw MailRepositoryError.actionUnavailable }
+        let targets = try await accountList().filter { accountID == nil || $0.id == accountID }
+        var marked = 0
+        var firstError: (any Error)?
+        for account in targets {
+            do {
+                // Gmail も、ほかのサーバーも、受信トレイは「INBOX」という名前で開ける
+                let (count, unreadLeft) = try await Self.using(openSession, account: account.id) { session in
+                    let uids = try await session.searchUnreadUIDs(in: "INBOX")
+                    for start in stride(from: 0, to: uids.count, by: Self.markReadChunkSize) {
+                        let chunk = Array(uids[start ..< min(start + Self.markReadChunkSize, uids.count)])
+                        try await session.setFlags(["\\Seen"], add: true, in: "INBOX", uids: chunk)
+                    }
+                    // 探したあとに届いた新着は未読のまま残るので、数はサーバーに聞き直す
+                    return (uids.count, try? await session.unreadCount(of: "INBOX"))
+                }
+                marked += count
+                let unread = try await store.summaries(matching: MessageQuery(accounts: [account.id], selection: .unified(.inbox)))
+                    .filter { !$0.isRead }
+                var updated: [StoredMessage] = []
+                for summary in unread {
+                    guard var stored = try await store.message(id: summary.id) else { continue }
+                    stored.summary.isRead = true
+                    updated.append(stored)
+                }
+                try await store.upsert(updated)
+                try await store.setInboxUnreadCount(unreadLeft ?? 0, account: account.id)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
+        if let firstError { throw firstError }
+        return marked
+    }
+
     // MARK: - 返信と送信 (T18)
 
     public func replySource(for id: MessageID) async throws -> ReplySource {
