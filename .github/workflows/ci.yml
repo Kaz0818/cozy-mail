@@ -40,6 +40,11 @@ jobs:
       # パッケージのテストは Linux で回している。ここでは Mac でだけ使うキーチェーンの部分がビルドできるかだけ確かめる
       - name: Build Mac-only package targets
         run: swift build --package-path Packages/AccountKit
+      # SwiftData の保存先 (MailStoreSwiftData) のテストは Mac でだけ動く (Linux では空になる)
+      - name: Test MailStore on macOS (SwiftData)
+        run: xcodebuild test -scheme MailStore-Package -destination 'platform=macOS'
+        working-directory: Packages/MailStore
+        shell: bash -o pipefail {0}
       - name: Generate Xcode project
         run: xcodegen generate
       - name: Build and test app

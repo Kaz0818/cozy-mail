@@ -32,7 +32,7 @@ Cozy Mail は、2 つの場所で作業する。
 
 ---
 
-## 2. 今の状況 (2026-11-14 クラウドで記入)
+## 2. 今の状況 (2026-11-14 ローカルで記入)
 
 ### 終わったもの (オーナーが Mac で確認済み)
 | タスク | 内容 |
@@ -43,30 +43,26 @@ Cozy Mail は、2 つの場所で作業する。
 | T14〜T18 | 本文と添付、既読・スター・アーカイブ・削除・迷惑メール、キーボードとメニュー、SMTP 送信、作成・返信・転送 |
 | そのほか | 右クリックメニュー、キーチェーンの確認を 1 回に (`docs/signing.md`)、差出人の名前、名前のないメールはアドレスを出す、「送信済み」は宛先を出す |
 
-テスト件数 (2026-11-14): MailCore 82、MailStore 95、アプリ 53 + UI テスト 6。
+テスト件数 (2026-11-14): MailCore 82、MailStore 111 (うち SwiftData 16 件は Mac だけ。Linux では 95)、アプリ 59 + UI テスト 6。
 
 ### 途中・残っているもの
 | タスク | 状態 | どこでやるか |
 |---|---|---|
-| **T10 の残り: Mac への保存 (SwiftData)** | **次にやる。** 同期処理は済み。保存先はまだメモリ上 | **ローカル** (SwiftData のテストは Mac だけ) |
+| **T10 の残り: Mac への保存 (SwiftData)** | SwiftData での保存は作った (PR #9、下書き、ブランチ `swiftdata-store`)。残り: メールがたまると画面が重くなる問題 (直し方をオーナーと相談中)、🍎 閉じて開き直す確認 | **ローカル** (SwiftData のテストは Mac だけ) |
 | T13: アカウントごとのフォルダ・Gmail のラベル | 統合のフォルダは済み | T10 のあと。保存先に手を入れるのでローカルがおすすめ |
 | T19: Mac 内の検索 | 未着手 | T10 のあと。保存先 (SwiftData) で探すのでローカル |
 | T9: Google でログイン (OAuth) | ⏸ 保留 (P2)。仕組みとテストは済み | — |
 | Yahoo! の確認 (T7、T11、T12 の一部) | Yahoo! のアドレスがないので未確認 | オーナー次第 |
 | チェックポイント v0.0「見本とほぼ同じか」 | オーナーの判断待ち | オーナー |
 
-### 次の人がやること: T10 を SwiftData で作る (ローカル)
-1. `Packages/MailStore` に **Apple 専用のターゲット** `MailStoreSwiftData` を足し、`SwiftDataMessageStore` を作る。
-   - `MailStore` 本体には SwiftData を入れない (Linux の CI が壊れるため)。キーチェーンの `AccountKitKeychain` と同じ分け方。
-   - `MessageStore` プロトコルのすべての操作を実装する (メール・同期の進み具合・未読数・フォルダ名・開いたメールの生データ)。
-   - 生データ (本文と添付) は大きいので、データベースの外のファイルに置くか、`@Attribute(.externalStorage)` を使う。
-2. テストを先に書く。参考ブランチ `claude/file-message-store` の `FileMessageStoreTests.swift` (10 件) を流用できる:
-   保存 → 開き直す、上書き、削除で生データも消える、フォルダの全削除、アカウント削除、開き直したあとの同期は新しいメールだけ。
-   SwiftData のテストは `swift test --package-path Packages/MailStore` (Mac) で動く。CI では macOS のジョブで動くように `ci.yml` に足す。
-3. `App/Services/MailService.swift` の `live()` で `InMemoryMessageStore` と差し替える。作れなかったときはメモリ上に戻す。
-   UI テスト (`-ui-testing`) とプレビューはメモリ上のまま。
-4. SPEC.md の「Mac 内の保存」と、tasks/todo.md・plan.md の T10 を直す。
-5. 🍎 オーナーに確認してもらう: 起動 → メールを開く → 終了 → もう一度起動すると、すぐに一覧が出て、開いたメールがすぐ表示される。
+### 次の人がやること: T10 の仕上げ (ローカル)
+1. PR #9 (`swiftdata-store`) がマージされるまで、保存先 (`Packages/MailStore`、`App/Services/MailService.swift`) を別のブランチで触らない。
+2. メールがたまると重くなる問題: `LiveMailRepository` が一覧や未読数のたびに `allSummaries()` で全件を読み直すため
+   (1,000 通で 0.4 秒、1 万通で 4 秒、3 万通で 12 秒)。おすすめは、フォルダ・条件で絞った一覧と未読数をデータベースに直接聞く操作を
+   `MessageStore` に足すこと。`MessageStore` の形が変わるので、オーナーの承認を得てから作る。
+3. 🍎 オーナーに確認してもらう: 起動 → メールを開く → 終了 → もう一度起動すると、すぐに一覧が出て、開いたメールがすぐ表示される。
+- SwiftData のパッケージのテストは、Mac で `cd Packages/MailStore && xcodebuild test -scheme MailStore-Package -destination 'platform=macOS'`。
+  CI の macOS のジョブにも同じものを足した。
 
 ### このあとの作業の場所の目安
 - **ローカル向き**: 保存先・画面・アプリ全体に関わるもの (T10、T13、T19、T21 メニューバー、T22 オフラインの待ち行列、T23 下書き、T24 送信の取り消し)。
@@ -76,6 +72,10 @@ Cozy Mail は、2 つの場所で作業する。
 ---
 
 ## 3. 作業の記録 (新しいものを上に)
+
+- **2026-11-14 ローカル**: T10 の保存を SwiftData で作った (`MailStoreSwiftData` の `SwiftDataMessageStore`、テスト 16 件)。PR #9 (下書き)。
+  あわせて、起動直後にキーチェーンの確認で一覧が空になる問題と、アプリの単体テストが本物のアカウントで受信していた問題を直した。
+  メールがたまると重くなる問題は計測だけして未解決 (直し方をオーナーと相談中)。
 
 - **2026-11-14 クラウド**: PR #7 (差出人の名前・名前がないときのアドレス表示・「送信済み」の宛先表示) をマージ。
   T10 の保存方法を相談 → オーナーが SwiftData を選択。ファイルで保存する案は `claude/file-message-store` に残した (マージしない)。
