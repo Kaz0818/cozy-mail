@@ -133,6 +133,12 @@ final class InboxModel {
         await reloadMessages()
     }
 
+    /// 通知から開く (T20b): 統合受信トレイに切り替えて、そのメールを選ぶ。nil なら受信トレイを出すだけ。
+    func show(_ id: MessageID?) async {
+        await select(.unified(.inbox))
+        if let id { await selectMessage(id) }
+    }
+
     /// 検索欄の言葉が変わった。空にすると、選んでいるフォルダに戻る。
     func search(_ text: String) async {
         guard text != searchText else { return }

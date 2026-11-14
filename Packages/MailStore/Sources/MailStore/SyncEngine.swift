@@ -76,6 +76,8 @@ public struct SyncEngine: Sendable {
         public var added = 0
         public var updated = 0
         public var removed = 0
+        /// 前回の同期のあとに受信トレイに来た、未読のメール (T20b の通知のもと)。初めての同期では空。
+        public var newInboxMessages: [MessageSummary] = []
     }
 
     private let store: any MessageStore
@@ -114,6 +116,7 @@ public struct SyncEngine: Sendable {
             report.added += result.added
             report.updated += result.updated
             report.removed += result.removed
+            report.newInboxMessages += result.newInboxMessages
         }
         // 受信トレイの未読数はサーバーに聞く (保存しているのは最近の分だけなので、数えると古い未読が漏れる)。
         // Gmail も INBOX を STATUS で聞ける。聞けなくても同期は失敗にしない (保存分で数える)
@@ -161,10 +164,12 @@ public struct SyncEngine: Sendable {
             let fresh = try await session.fetchHeaders(
                 in: target.name, fromUID: highest + 1, includeGmailAttributes: gmail
             ).filter { $0.uid > highest }
-            try await store.upsert(fresh.map {
+            let freshMessages = fresh.map {
                 Self.makeMessage($0, account: account.id, target: target, uidValidity: status.uidValidity, gmail: gmail)
-            })
+            }
+            try await store.upsert(freshMessages)
             report.added = fresh.count
+            report.newInboxMessages = freshMessages.map(\.summary).filter { $0.mailbox == .inbox && !$0.isRead }
             highest = max(highest, fresh.map(\.uid).max() ?? 0)
         } else {
             // 初回、または UIDVALIDITY が変わった: 保存分を捨てて、最近の分だけ取り直す

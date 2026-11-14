@@ -60,6 +60,9 @@ struct CozyMailApp: App {
                 Tab("見た目", systemImage: "paintpalette") {
                     AppearanceSettings()
                 }
+                Tab("通知", systemImage: "bell") {
+                    NotificationSettings()
+                }
             }
             .environment(service)
         }
