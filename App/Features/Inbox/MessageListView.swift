@@ -56,7 +56,11 @@ struct MessageListView: View {
             .onAppear { isListFocused = true }
             .overlay {
                 if model.messages.isEmpty {
-                    ContentUnavailableView("メールはありません", systemImage: "tray")
+                    if model.isSearching {
+                        ContentUnavailableView("見つかりませんでした", systemImage: "magnifyingglass")
+                    } else {
+                        ContentUnavailableView("メールはありません", systemImage: "tray")
+                    }
                 }
             }
         }

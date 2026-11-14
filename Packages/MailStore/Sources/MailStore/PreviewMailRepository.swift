@@ -21,6 +21,13 @@ public struct PreviewMailRepository: MailRepository {
         summaries.filter { selection.contains($0) && filter.matches($0) }
     }
 
+    public func search(_ text: String, filter: MessageFilter) async throws -> [MessageSummary] {
+        let query = MessageQuery(accounts: Set(summaries.map(\.accountID)), selection: nil, filter: filter, searchText: text)
+        return summaries
+            .filter { query.matches(StoredMessage(summary: $0, mailbox: "", uid: 0)) }
+            .sorted { $0.date > $1.date }
+    }
+
     public func unreadCount(in selection: MailboxSelection) async throws -> Int {
         summaries.count { selection.contains($0) && !$0.isRead }
     }

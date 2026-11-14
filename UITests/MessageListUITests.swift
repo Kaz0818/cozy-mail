@@ -75,6 +75,23 @@ final class MessageListUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["<k.tanaka@example.com>"].waitForExistence(timeout: 5), "↑ で前のメールに戻らない")
     }
 
+    /// T19: ⌘F で検索欄に移り、打った言葉に合うメールだけが一覧に出る。esc で元の一覧に戻る。
+    @MainActor
+    func testSearchingNarrowsTheListAndEscapeClearsIt() throws {
+        let app = launch()
+        _ = findRow("preview-1", in: app)
+
+        app.typeKey("f", modifierFlags: .command)
+        app.typeText("tanaka")
+
+        XCTAssertTrue(app.staticTexts["検索"].waitForExistence(timeout: 5), "一覧が検索の結果にならない")
+        XCTAssertTrue(app.descendants(matching: .any)["messageRow.preview-3"].exists, "合うメールが出ない")
+        XCTAssertFalse(app.descendants(matching: .any)["messageRow.preview-1"].exists, "合わないメールが残っている")
+
+        app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(app.descendants(matching: .any)["messageRow.preview-1"].waitForExistence(timeout: 5), "esc で元の一覧に戻らない")
+    }
+
     /// T16: メニューバーに「メッセージ」メニューがあり、操作が並んでいる。
     @MainActor
     func testMessageMenuListsTheActions() throws {

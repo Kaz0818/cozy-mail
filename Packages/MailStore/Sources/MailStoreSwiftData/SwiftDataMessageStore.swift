@@ -375,17 +375,24 @@ public actor SwiftDataMessageStore: MessageStore {
     }
 
     public func summaries(matching query: MessageQuery) throws -> [MessageSummary] {
-        guard let predicate = Self.predicate(for: query, unreadOnly: false) else { return [] }
-        let descriptor = FetchDescriptor<MailRecord>(
-            predicate: predicate,
-            sortBy: [SortDescriptor(\.date, order: .reverse)]
-        )
-        return try modelContext.fetch(descriptor).map { Self.stored($0).summary }
+        try records(matching: query, unreadOnly: false).map { Self.stored($0).summary }
     }
 
     public func unreadCount(matching query: MessageQuery) throws -> Int {
+        // 検索の言葉があるときは、データベースで粗く絞ったあと、残りの言葉を確かめてから数える
+        guard query.searchWords.isEmpty else { return try records(matching: query, unreadOnly: true).count }
         guard let predicate = Self.predicate(for: query, unreadOnly: true) else { return 0 }
         return try modelContext.fetchCount(FetchDescriptor<MailRecord>(predicate: predicate))
+    }
+
+    /// 条件に合うメール (新しい順)。検索の言葉は、最初の 1 つをデータベースで探し、
+    /// 残りの言葉と細かい決まりは `MessageQuery.matchesSearch` で確かめる (メモリ上の保存先と同じ結果にするため)。
+    private func records(matching query: MessageQuery, unreadOnly: Bool) throws -> [MailRecord] {
+        guard let predicate = Self.predicate(for: query, unreadOnly: unreadOnly) else { return [] }
+        let descriptor = FetchDescriptor<MailRecord>(predicate: predicate, sortBy: [SortDescriptor(\.date, order: .reverse)])
+        let found = try modelContext.fetch(descriptor)
+        guard !query.searchWords.isEmpty else { return found }
+        return found.filter { query.matchesSearch(Self.stored($0).summary) }
     }
 
     public func message(id: MessageID) throws -> StoredMessage? {
@@ -485,27 +492,30 @@ public actor SwiftDataMessageStore: MessageStore {
     private static func predicate(for query: MessageQuery, unreadOnly: Bool) -> Predicate<MailRecord>? {
         let selection = query.selection
         let accountIDs = query.accounts
-            .filter { selection.accountID == nil || $0 == selection.accountID }
+            .filter { selection?.accountID == nil || $0 == selection?.accountID }
             .map(\.rawValue)
         guard !accountIDs.isEmpty else { return nil }
 
         // フォルダの条件
-        var role: String? = selection.role?.rawValue
+        var role: String? = selection?.role?.rawValue
         var mustBeUnread = unreadOnly || query.filter == .unread
         var mustBeStarred = query.filter == .starred
         var hidesJunkAndTrash = false
         // ラベル: そのラベルが付いたメール (迷惑メールとゴミ箱を除く)。区切りごと探すので、名前の一部には当たらない
         var labelPattern = ""
-        switch selection.role {
+        switch selection {
         case nil:
-            labelPattern = labelKey(for: [selection.label ?? ""])
+            // 検索: 迷惑メールとゴミ箱を除く、すべてのフォルダ
             hidesJunkAndTrash = true
-        case .starred:
+        case .label(_, let name):
+            labelPattern = labelKey(for: [name])
+            hidesJunkAndTrash = true
+        case .unified(.starred), .account(_, .starred):
             // スター付き: 迷惑メールとゴミ箱を除く、どのフォルダでも
             role = nil
             mustBeStarred = true
             hidesJunkAndTrash = true
-        case .unread:
+        case .unified(.unread), .account(_, .unread):
             // 未読: 受信トレイの未読
             role = MailboxRole.inbox.rawValue
             mustBeUnread = true
@@ -517,8 +527,10 @@ public actor SwiftDataMessageStore: MessageStore {
         let anyLabel = labelPattern.isEmpty
         let junk = MailboxRole.junk.rawValue
         let trash = MailboxRole.trash.rawValue
+        // 検索の最初の言葉 (残りの言葉は、取り出したあとで確かめる)
+        let firstWord = query.searchWords.first ?? ""
 
-        return #Predicate<MailRecord> { record in
+        let place = #Predicate<MailRecord> { record in
             accountIDs.contains(record.accountID)
                 && (anyRole || record.role == roleValue)
                 && (!mustBeUnread || !record.isRead)
@@ -526,6 +538,15 @@ public actor SwiftDataMessageStore: MessageStore {
                 && (anyLabel || record.labelKey.contains(labelPattern))
                 && (!hidesJunkAndTrash || (record.role != junk && record.role != trash))
         }
+        guard !query.searchWords.isEmpty else { return place }
+        // 1 つの式にすると型の確かめが終わらないので、検索の条件は分けて作り、あとで合わせる
+        let search = #Predicate<MailRecord> { record in
+            record.senderName.localizedStandardContains(firstWord)
+                || record.senderAddress.localizedStandardContains(firstWord)
+                || record.subject.localizedStandardContains(firstWord)
+                || record.preview.localizedStandardContains(firstWord)
+        }
+        return #Predicate<MailRecord> { record in place.evaluate(record) && search.evaluate(record) }
     }
 
     /// アカウントとフォルダ名を 1 つの文字列にする (どちらにも現れない区切り文字を使う)。

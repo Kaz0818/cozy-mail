@@ -7,6 +7,9 @@ public protocol MailRepository: Sendable {
     /// 新しい順に並べて返す。
     func messages(in selection: MailboxSelection, filter: MessageFilter) async throws -> [MessageSummary]
     func unreadCount(in selection: MailboxSelection) async throws -> Int
+    /// Mac に保存したメールから探す (T19)。迷惑メールとゴミ箱を除く、すべてのアカウントとフォルダ。新しい順。
+    /// 空白で区切った言葉は、すべてを含むもの。差出人の名前・アドレス・件名・本文の書き出しから探す。
+    func search(_ text: String, filter: MessageFilter) async throws -> [MessageSummary]
     /// そのアカウントの Gmail のラベル (自分で作ったもの)。名前順。
     func labels(for account: AccountID) async throws -> [String]
     /// 本文。必要ならサーバーから取る。
@@ -31,6 +34,11 @@ public enum SendOutcome: Sendable, Equatable {
 extension MailRepository {
     /// ラベルを扱わない窓口 (見本のメール、テスト用のものなど) の既定: ラベルはない。
     public func labels(for account: AccountID) async throws -> [String] {
+        []
+    }
+
+    /// 検索に対応していない窓口 (テスト用のものなど) の既定: 見つからない。
+    public func search(_ text: String, filter: MessageFilter) async throws -> [MessageSummary] {
         []
     }
 

@@ -33,6 +33,8 @@ final class InboxModel {
     private(set) var messages: [MessageSummary] = []
     private(set) var selection: MailboxSelection = .unified(.inbox)
     private(set) var filter: MessageFilter = .all
+    /// 検索欄の言葉 (T19)。空白だけでないとき、一覧は検索の結果になる。
+    private(set) var searchText = ""
     private(set) var selectedMessageID: MessageID?
     private(set) var selectedBody: MessageBody?
     /// 本文を取れなかったときの説明。取れたら nil。
@@ -116,11 +118,24 @@ final class InboxModel {
     }
 
     func select(_ newSelection: MailboxSelection) async {
-        guard newSelection != selection else { return }
+        // 検索中は、同じフォルダを選んでも検索をやめてそのフォルダを出す
+        guard newSelection != selection || isSearching else { return }
         let accountChanged = newSelection.accountID != selection.accountID
         selection = newSelection
+        searchText = ""
         if accountChanged { await refreshLabels() }
         await reloadMessages()
+    }
+
+    /// 検索欄の言葉が変わった。空にすると、選んでいるフォルダに戻る。
+    func search(_ text: String) async {
+        guard text != searchText else { return }
+        searchText = text
+        await reloadMessages()
+    }
+
+    var isSearching: Bool {
+        !searchText.allSatisfy(\.isWhitespace)
     }
 
     func setFilter(_ newFilter: MessageFilter) async {
@@ -141,7 +156,7 @@ final class InboxModel {
             await markReadOnOpen(id)
             // 初めて本文を取ったメールは、一覧の書き出し (2 行目) が埋まる。その書き出しだけを写す。
             // 一覧そのものは入れ替えない (「未読」で絞っているとき、既読にしたばかりのメールが消えてしまうため)
-            if let refreshed = try? await repository.messages(in: selection, filter: filter), selectedMessageID == id,
+            if let refreshed = try? await currentMessages(), selectedMessageID == id,
                let fresh = refreshed.first(where: { $0.id == id }) {
                 patch(id) { $0.preview = fresh.preview }
             }
@@ -254,15 +269,33 @@ final class InboxModel {
     /// 一覧を読み直す。選んでいたメールがなくなったら、`fallbackIndex` の位置 (なければ先頭) のメールを選ぶ。
     private func reloadMessages(fallbackIndex: Int? = nil) async {
         do {
-            messages = try await repository.messages(in: selection, filter: filter)
+            // 文字を打つたびに探すので、待っている間に言葉やフォルダが変わったら、古い結果は使わない
+            let request = (selection, filter, searchText)
+            let found = try await currentMessages()
+            guard request == (selection, filter, searchText) else { return }
+            messages = found
             let keepSelection = selectedMessageID.map { id in messages.contains { $0.id == id } } ?? false
             if !keepSelection {
+                // 検索で打っている途中に一番上のメールを開くと、読んでいない未読メールまで既読になってしまう。
+                // 検索の結果が変わっただけのときは、何も開かない (削除などで消えたときは、次のメールを開く)
+                if isSearching && fallbackIndex == nil {
+                    await selectMessage(nil)
+                    return
+                }
                 let index = min(fallbackIndex ?? 0, messages.count - 1)
                 await selectMessage(messages.indices.contains(index) ? messages[index].id : nil)
             }
         } catch {
             errorMessage = String(describing: error)
         }
+    }
+
+    /// いまの一覧の中身: 検索中なら検索の結果、そうでなければ選んでいるフォルダ。
+    private func currentMessages() async throws -> [MessageSummary] {
+        if isSearching {
+            return try await repository.search(searchText, filter: filter)
+        }
+        return try await repository.messages(in: selection, filter: filter)
     }
 
     // MARK: - キーボード操作 (T16)
@@ -314,11 +347,15 @@ final class InboxModel {
     }
 
     var title: String {
+        if isSearching { return "検索" }
         if let label = selection.label { return label }
         return selection.role.map(Self.folderName) ?? ""
     }
 
     var subtitle: String {
+        if isSearching {
+            return "「\(searchText.trimmingCharacters(in: .whitespaces))」・\(messages.count)件"
+        }
         let scope: String
         let unread: Int
         if let accountID = selection.accountID, let item = accounts.first(where: { $0.id == accountID }) {

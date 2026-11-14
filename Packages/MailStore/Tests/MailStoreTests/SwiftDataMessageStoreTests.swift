@@ -165,6 +165,29 @@ import Testing
     }
 
     /// 読めない保存ファイルは、黙って壊さず、開けないと知らせる (アプリはメモリ上の保存先に切り替える)。
+    /// 1 万通の中から、1 秒以内に検索の結果が出る (T19、US-10)。日本語の部分一致で見つかる。
+    @Test func searchingTenThousandMessagesTakesUnderASecond() async throws {
+        let folder = Folder()
+        let store = try open(folder)
+        var messages: [StoredMessage] = []
+        for uid in UInt32(1) ... 10000 {
+            var item = message(uid, account: uid.isMultiple(of: 2) ? gmail : yahoo, subject: "お知らせ \(uid)")
+            if uid.isMultiple(of: 1000) { item.summary.subject = "来週の定例会議の資料 \(uid)" }
+            messages.append(item)
+        }
+        for start in stride(from: 0, to: messages.count, by: 1000) {
+            try await store.upsert(Array(messages[start ..< min(start + 1000, messages.count)]))
+        }
+        let reopened = try open(folder)
+
+        let started = ContinuousClock.now
+        let found = try await reopened.summaries(matching: MessageQuery(accounts: [gmail, yahoo], selection: nil, searchText: "定例会議"))
+        let elapsed = ContinuousClock.now - started
+
+        #expect(found.count == 10)
+        #expect(elapsed < .seconds(1), "検索に \(elapsed) かかった")
+    }
+
     /// ラベルの一覧と、ラベルでの絞り込みは、開き直しても使える (T13)。
     @Test func labelsSurviveReopening() async throws {
         let folder = Folder()
