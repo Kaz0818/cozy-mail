@@ -51,6 +51,8 @@ final class MailService {
     let signatures: SignatureStore
     /// Mac に保存した下書き (T23a)。
     let drafts: DraftStore
+    /// サーバー側の検索で見つけたメールを、アプリを開いている間だけ覚えておく (T27)。
+    private let serverSearchResults = ServerSearchCache()
     private let store: any MessageStore
     private let engine: SyncEngine
     /// 受信トレイを見張って新着をすぐ取るか (T20a)。アプリだけ。テストと見本では本物のサーバーにつながないよう見張らない。
@@ -356,8 +358,15 @@ final class MailService {
             // 送信も、そのたびに送信用のサーバーにつなぎ、送ったら閉じる
             openSender: { accountID in try await directory.openSender(for: accountID) }
         )
+        // 検索の結果の下で「サーバーで探す」ができる (T27)
+        let searchable = ServerSearchRepository(
+            base: live, store: store,
+            accounts: { [weak self] in await self?.accounts ?? [] },
+            openSession: { accountID in try await directory.openSession(for: accountID) },
+            cache: serverSearchResults
+        )
         return DraftsMergingRepository(
-            base: live, drafts: drafts,
+            base: searchable, drafts: drafts,
             // 一覧の「削除」で消したら、サーバーの写しも消す (T23b)
             onDelete: { [weak self] saved in await self?.localDraftDeleted(saved) }
         )

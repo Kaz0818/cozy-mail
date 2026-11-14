@@ -49,6 +49,10 @@ struct MessageListView: View {
                                 }
                             }
                         }
+                        // 検索の結果の下に「サーバーで探す」(T27)
+                        if model.isSearching && !model.messages.isEmpty {
+                            ServerSearchFooter(model: model)
+                        }
                     }
                 }
                 // キーボードで選んだメールが見えるように、一覧を動かす
@@ -68,7 +72,11 @@ struct MessageListView: View {
             .overlay {
                 if model.messages.isEmpty {
                     if model.isSearching {
-                        ContentUnavailableView("見つかりませんでした", systemImage: "magnifyingglass")
+                        ContentUnavailableView {
+                            Label("Mac の中には見つかりませんでした", systemImage: "magnifyingglass")
+                        } actions: {
+                            ServerSearchFooter(model: model)
+                        }
                     } else {
                         ContentUnavailableView("メールはありません", systemImage: "tray")
                     }
@@ -159,6 +167,46 @@ private struct Notice: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassCard()
         .padding(.horizontal, 6)
+    }
+}
+
+/// 検索の結果の下に出す「サーバーで探す」と、その様子 (T27)。
+/// Mac に保存していない古いメールや、本文の中の言葉でも見つかる。
+private struct ServerSearchFooter: View {
+    let model: InboxModel
+
+    var body: some View {
+        VStack(spacing: 6) {
+            switch model.serverSearchState {
+            case .idle:
+                searchButton
+            case .searching:
+                ProgressView("サーバーで探しています…")
+                    .controlSize(.small)
+            case let .finished(added):
+                Text(added == 0 ? "サーバーにも、ほかには見つかりませんでした" : "サーバーで \(added) 件見つかりました")
+                    .font(.callout)
+                    .foregroundStyle(Palette.textSecondary)
+            case let .failed(message):
+                Text(message)
+                    .font(.callout)
+                    .foregroundStyle(Palette.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+                searchButton
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+    }
+
+    private var searchButton: some View {
+        Button {
+            Task { await model.searchOnServer() }
+        } label: {
+            Label("サーバーで探す", systemImage: "icloud.and.arrow.down")
+        }
+        .help("Mac に保存していない古いメールや、本文の中の言葉でも探します")
+        .disabled(!model.canSearchOnServer)
     }
 }
 

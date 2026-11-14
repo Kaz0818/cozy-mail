@@ -31,6 +31,17 @@ struct ReaderView: View {
                         .padding(.horizontal, 32)
                         .padding(.top, 8)
                 }
+                // サーバーで見つけたメール (T27) は、読む・返信・転送だけできる
+                if ServerMessage.isServerOnly(message.id) {
+                    Label("サーバーで見つけたメールです (Mac には保存していないので、読む・返信・転送だけできます)", systemImage: "icloud")
+                        .font(.callout)
+                        .foregroundStyle(Palette.textSecondary)
+                        .padding(12)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .glassCard()
+                        .padding(.horizontal, 32)
+                        .padding(.top, 8)
+                }
                 MessageContent(model: model, message: message)
                     // メールを変えたら「画像を表示」などの状態を初めに戻す
                     .id(message.id)

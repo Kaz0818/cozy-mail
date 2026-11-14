@@ -35,6 +35,19 @@ final class InboxModel {
     private(set) var filter: MessageFilter = .all
     /// 検索欄の言葉 (T19)。空白だけでないとき、一覧は検索の結果になる。
     private(set) var searchText = ""
+
+    /// サーバー側の検索 (T27) の様子。
+    enum ServerSearchState: Equatable {
+        case idle
+        case searching
+        /// 探し終えた。`added` は、Mac 内の結果に足したメールの数。
+        case finished(added: Int)
+        case failed(String)
+    }
+
+    private(set) var serverSearchState = ServerSearchState.idle
+    /// サーバーで見つけたメール (いまの言葉の分)。Mac 内の結果と重なるものも含む (一覧に出すときに除く)。
+    private var serverMatches: [MessageSummary] = []
     private(set) var selectedMessageID: MessageID?
     /// ⌘ / ⇧ + クリック、⌘A で選んだメール (T26)。2 通以上のときは、まとめて操作する。
     /// 1 通だけのときは `selectedMessageID` だけを入れておく。`selectedMessageID` は、⇧ + クリックの起点にもなる。
@@ -126,6 +139,7 @@ final class InboxModel {
         let accountChanged = newSelection.accountID != selection.accountID
         selection = newSelection
         searchText = ""
+        clearServerSearch()
         if accountChanged { await refreshLabels() }
         await reloadMessages()
     }
@@ -140,11 +154,63 @@ final class InboxModel {
     func search(_ text: String) async {
         guard text != searchText else { return }
         searchText = text
+        clearServerSearch()
         await reloadMessages()
     }
 
     var isSearching: Bool {
         !searchText.allSatisfy(\.isWhitespace)
+    }
+
+    // MARK: - サーバー側の検索 (T27)
+
+    /// 「サーバーで探す」を出すか: 検索中で、その言葉ではまだ探していない (失敗したときは、また押せる)。
+    var canSearchOnServer: Bool {
+        guard isSearching, !isShowingSamples else { return false }
+        switch serverSearchState {
+        case .idle, .failed: return true
+        case .searching, .finished: return false
+        }
+    }
+
+    /// いまの言葉でサーバーで探し、Mac 内の結果の下に、重ならないメールを足す。
+    func searchOnServer() async {
+        guard canSearchOnServer else { return }
+        let text = searchText
+        serverSearchState = .searching
+        do {
+            let found = try await repository.searchServer(text)
+            // 待っている間に言葉を変えたら、古い結果は使わない
+            guard text == searchText else { return }
+            serverMatches = found
+            await reloadMessages()
+            serverSearchState = .finished(added: serverAdditions.count)
+        } catch {
+            guard text == searchText else { return }
+            serverSearchState = .failed(Self.describe(error, doing: "サーバーで検索"))
+        }
+    }
+
+    private func clearServerSearch() {
+        serverMatches = []
+        serverSearchState = .idle
+        serverAdditions = []
+    }
+
+    /// 一覧のうち、サーバーの結果から足したメール (Mac 内の結果になかったもの)。
+    private var serverAdditions: Set<MessageID> = []
+
+    /// サーバーの結果のうち、Mac 内の結果と重ならず、絞り込み (未読・スター付き) に合うもの。
+    private func serverExtras(excluding local: [MessageSummary]) -> [MessageSummary] {
+        let localIDs = Set(local.map(\.id))
+        return serverMatches.filter { message in
+            guard !localIDs.contains(message.id) else { return false }
+            switch filter {
+            case .all: return true
+            case .unread: return !message.isRead
+            case .starred: return message.isStarred
+            }
+        }
     }
 
     func setFilter(_ newFilter: MessageFilter) async {
@@ -293,7 +359,8 @@ final class InboxModel {
     /// 一覧は読み直さず、その行と未読数だけを変える (「未読」で絞っているとき、読み直すと次のメールが選ばれ、
     /// それも既読になり…と続いてしまうため)。
     private func markReadOnOpen(_ id: MessageID) async {
-        guard !isShowingSamples, let message = messages.first(where: { $0.id == id }), !message.isRead else { return }
+        guard !isShowingSamples, let message = messages.first(where: { $0.id == id }), !message.isRead,
+              !ServerMessage.isServerOnly(id) else { return }
         do {
             try await repository.perform(.markRead, on: id)
             patch(id) { $0.isRead = true }
@@ -338,6 +405,8 @@ final class InboxModel {
         guard !isShowingSamples, let message else { return false }
         // Mac に保存した下書き (T23a) は「削除」(下書きを消す) だけ
         if LocalDraft.id(from: message.id) != nil { return action == .moveToTrash }
+        // サーバーで見つけた、Mac に保存していないメール (T27) は、開くだけ
+        if ServerMessage.isServerOnly(message.id) { return false }
         switch action {
         case .markRead: return !message.isRead
         case .markUnread: return message.isRead
@@ -437,7 +506,11 @@ final class InboxModel {
     /// いまの一覧の中身: 検索中なら検索の結果、そうでなければ選んでいるフォルダ。
     private func currentMessages() async throws -> [MessageSummary] {
         if isSearching {
-            return try await repository.search(searchText, filter: filter)
+            let local = try await repository.search(searchText, filter: filter)
+            // サーバーで探したあとは、その結果 (重ならないもの) を下に足す (T27)
+            let extras = serverExtras(excluding: local)
+            serverAdditions = Set(extras.map(\.id))
+            return local + extras
         }
         return try await repository.messages(in: selection, filter: filter)
     }

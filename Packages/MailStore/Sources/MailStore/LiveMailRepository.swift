@@ -258,6 +258,11 @@ public struct LiveMailRepository: MailRepository {
     public func replySource(for id: MessageID) async throws -> ReplySource {
         let raw = try await rawMessage(for: id)
         guard let stored = try await store.message(id: id) else { throw MailRepositoryError.messageNotFound(id) }
+        return try Self.replySource(raw: raw, id: id, stored: stored)
+    }
+
+    /// メールの全体から、返信・転送に使う情報を作る (サーバー側の検索で見つけたメールにも使う、T27)。
+    static func replySource(raw: Data, id: MessageID, stored: StoredMessage) throws -> ReplySource {
         let parsed = try MIMEParser.parse(raw)
         let body = try MessageBodyBuilder.body(id: id, raw: raw)
         let contacts = { (addresses: [EmailAddress]) in addresses.map { Contact(name: $0.name, address: $0.address) } }
