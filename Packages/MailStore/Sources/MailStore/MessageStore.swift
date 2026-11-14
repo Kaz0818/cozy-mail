@@ -39,6 +39,26 @@ public struct MailboxSyncState: Sendable, Hashable, Codable {
     }
 }
 
+/// 一覧と未読数のための絞り込み。保存先が自分の中で (SwiftData ならデータベースで) 絞り込めるよう、条件だけを渡す。
+/// 何年分のメールがあっても、画面を更新するたびに全部を読み込まずに済む。
+public struct MessageQuery: Sendable, Hashable {
+    /// このアカウントのメールだけ (登録中のもの。削除したアカウントのメールは出さない)。
+    public var accounts: Set<AccountID>
+    public var selection: MailboxSelection
+    public var filter: MessageFilter
+
+    public init(accounts: Set<AccountID>, selection: MailboxSelection, filter: MessageFilter = .all) {
+        self.accounts = accounts
+        self.selection = selection
+        self.filter = filter
+    }
+
+    /// 画面の決まり (`MailboxSelection.contains`・`MessageFilter.matches`) どおりかどうか。保存先の実装はこれと同じ結果を返す。
+    public func matches(_ message: MessageSummary) -> Bool {
+        accounts.contains(message.accountID) && selection.contains(message) && filter.matches(message)
+    }
+}
+
 /// メールの保存先。アプリでは SwiftData (`MailStoreSwiftData`)、テストではメモリ上 (`InMemoryMessageStore`)。
 public protocol MessageStore: Sendable {
     func syncState(account: AccountID, mailbox: String) async throws -> MailboxSyncState?
@@ -54,7 +74,12 @@ public protocol MessageStore: Sendable {
     /// サーバーから聞いた受信トレイの未読数。まだ聞けていなければ nil。
     func inboxUnreadCount(account: AccountID) async throws -> Int?
     func setInboxUnreadCount(_ count: Int, account: AccountID) async throws
+    /// 保存しているすべてのメール。何年分もあると重いので、画面には使わない (`summaries(matching:)` を使う)。
     func allSummaries() async throws -> [MessageSummary]
+    /// 条件に合うメールを、新しい順に。
+    func summaries(matching query: MessageQuery) async throws -> [MessageSummary]
+    /// 条件に合うメールのうち、未読の数。
+    func unreadCount(matching query: MessageQuery) async throws -> Int
     func message(id: MessageID) async throws -> StoredMessage?
     /// 取得したメール全体の生データ (本文と添付)。まだ取っていなければ nil。
     func rawMessage(for id: MessageID) async throws -> Data?
@@ -129,6 +154,14 @@ public actor InMemoryMessageStore: MessageStore {
 
     public func allSummaries() -> [MessageSummary] {
         stored.values.map(\.summary)
+    }
+
+    public func summaries(matching query: MessageQuery) -> [MessageSummary] {
+        stored.values.map(\.summary).filter(query.matches).sorted { $0.date > $1.date }
+    }
+
+    public func unreadCount(matching query: MessageQuery) -> Int {
+        stored.values.count { query.matches($0.summary) && !$0.summary.isRead }
     }
 
     public func message(id: MessageID) -> StoredMessage? {
