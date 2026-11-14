@@ -12,6 +12,8 @@ final class ResponseCollector: ChannelInboundHandler, @unchecked Sendable {
     /// 接続が閉じた (または壊れた) 理由。閉じたあとに送った命令は、待たずにこの理由で失敗させる
     /// (待ち続けると、答えの来ない約束が残る)。
     private var closedReason: IMAPError?
+    /// IDLE 中に、フォルダが変わった知らせを待っている約束 (T20a)。
+    private var changeWatcher: EventLoopPromise<Void>?
 
     /// 接続直後のあいさつ (`* OK ...`) を待つ。
     func waitForGreeting(on eventLoop: EventLoop) async throws(IMAPError) {
@@ -41,6 +43,28 @@ final class ResponseCollector: ChannelInboundHandler, @unchecked Sendable {
             }
         }
         return PendingResult(future: promise.futureResult)
+    }
+
+    /// IDLE 中に、フォルダが変わった知らせ (EXISTS・EXPUNGE・FETCH・RECENT) が届いたら果たされる約束を作る。
+    /// 次に送る命令 (IDLE) の `expect` と一緒に使う。
+    func watchForChanges(on eventLoop: EventLoop) -> EventLoopFuture<Void> {
+        let promise = eventLoop.makePromise(of: Void.self)
+        eventLoop.execute {
+            if let reason = self.closedReason {
+                promise.fail(reason)
+            } else {
+                self.changeWatcher = promise
+            }
+        }
+        return promise.futureResult
+    }
+
+    /// IDLE を抜けたら、見張りをやめる (まだ果たされていなければ、何もしない)。
+    func stopWatchingForChanges(on eventLoop: EventLoop) {
+        eventLoop.execute {
+            self.changeWatcher?.succeed()
+            self.changeWatcher = nil
+        }
     }
 
     struct PendingResult {
@@ -73,6 +97,9 @@ final class ResponseCollector: ChannelInboundHandler, @unchecked Sendable {
         case let .tagged(tagged) where tagged.tag == current?.tag:
             guard let pending = current else { return }
             current = nil
+            // IDLE が (断られるなどで) 終わったら、見張りもやめる
+            changeWatcher?.succeed()
+            changeWatcher = nil
             switch tagged.state {
             case .ok:
                 pending.promise.succeed(pending.responses)
@@ -84,10 +111,24 @@ final class ResponseCollector: ChannelInboundHandler, @unchecked Sendable {
             let reply = IMAPClientHandler.Message.part(.continuationResponse(context.channel.allocator.buffer(capacity: 0)))
             context.writeAndFlush(NIOAny(reply), promise: nil)
         case let .fatal(text):
-            // LOGOUT への BYE は正常なので、命令の結果を待つ
-            if current == nil { fail(IMAPError.commandFailed(text.text)) }
+            // LOGOUT への BYE は正常なので、命令の結果を待つ。IDLE 中の BYE は、サーバーが切ろうとしている
+            if current == nil {
+                fail(IMAPError.commandFailed(text.text))
+            } else if changeWatcher != nil {
+                if closedReason == nil { closedReason = .connectionClosed }
+                fail(IMAPError.connectionClosed)
+            }
+        case .untagged(.conditionalState(.bye)) where changeWatcher != nil:
+            // IDLE 中の BYE: サーバーが接続を切ろうとしている。待っている IDLE を失敗させて閉じる
+            if closedReason == nil { closedReason = .connectionClosed }
+            fail(IMAPError.connectionClosed)
+            context.close(promise: nil)
         default:
             current?.responses.append(response)
+            if let watcher = changeWatcher, Self.isChange(response) {
+                changeWatcher = nil
+                watcher.succeed()
+            }
         }
     }
 
@@ -104,9 +145,26 @@ final class ResponseCollector: ChannelInboundHandler, @unchecked Sendable {
         context.close(promise: nil)
     }
 
+    /// IDLE 中に届いたとき、「フォルダが変わった」と見なす知らせか。
+    static func isChange(_ response: Response) -> Bool {
+        switch response {
+        case .fetch:
+            return true
+        case let .untagged(payload):
+            switch payload {
+            case .mailboxData(.exists), .mailboxData(.recent), .messageData(.expunge): return true
+            default: return false
+            }
+        default:
+            return false
+        }
+    }
+
     private func fail(_ error: IMAPError) {
         greeting?.fail(error)
         greeting = nil
+        changeWatcher?.fail(error)
+        changeWatcher = nil
         current?.promise.fail(error)
         current = nil
     }

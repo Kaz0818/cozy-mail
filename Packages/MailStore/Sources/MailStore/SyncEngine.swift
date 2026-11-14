@@ -23,6 +23,19 @@ public protocol MailServerSession: Sendable {
     func append(_ message: Data, to mailbox: String, flags: [String]) async throws
     /// ログアウトして接続を閉じる。
     func close() async
+    /// サーバーが IDLE (変わったら知らせる仕組み) に対応しているか (T20a)。
+    func supportsIdle() async throws -> Bool
+    /// フォルダの変化・時間切れ・作業の中止のどれかまで待つ (T20a)。
+    func idle(in mailbox: String, timeout: Duration) async throws -> IMAPIdleEvent
+}
+
+extension MailServerSession {
+    /// IDLE を使わない接続 (テストの偽物など) は、対応していないことにする。
+    public func supportsIdle() async throws -> Bool { false }
+
+    public func idle(in mailbox: String, timeout: Duration) async throws -> IMAPIdleEvent {
+        throw IMAPError.commandFailed("IDLE is not supported")
+    }
 }
 
 extension IMAPSession: MailServerSession {

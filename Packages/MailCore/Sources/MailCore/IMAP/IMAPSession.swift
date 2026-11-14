@@ -335,6 +335,74 @@ public actor IMAPSession {
         _ = try await result.wait()
     }
 
+    // MARK: - 新着を待つ (IDLE、T20a)
+
+    /// サーバーが IDLE (変わったら知らせる仕組み) に対応しているか。
+    public func supportsIdle() async throws(IMAPError) -> Bool {
+        try await serverCapabilities().contains("IDLE")
+    }
+
+    /// 何もしない命令。接続が生きているかを確かめる。
+    public func noop() async throws(IMAPError) {
+        _ = try await run(.noop)
+    }
+
+    /// フォルダを開いて IDLE に入り、変わった知らせ・時間切れ・作業の中止のどれかが来るまで待つ。
+    /// 終わるときは DONE を送って IDLE を抜けるので、続けて別の命令を送れる。
+    /// サーバーが IDLE を断った・接続が切れたときは投げる。
+    /// DONE の返事が `doneTimeout` のあいだに来なければ、回線が黙って切れていると見なし、接続を閉じて投げる。
+    public func idle(
+        in mailbox: String, timeout: Duration, doneTimeout: Duration = .seconds(15)
+    ) async throws(IMAPError) -> IMAPIdleEvent {
+        try await ensureExamined(mailbox)
+        let eventLoop = channel.eventLoop
+        let tag = "C\(nextTag)"
+        nextTag += 1
+        let result = collector.expect(tag: tag, on: eventLoop)
+        let changes = collector.watchForChanges(on: eventLoop)
+        let race = IdleRace(eventLoop: eventLoop)
+        changes.whenComplete { _ in race.finish(.changed) }
+        // サーバーが自分で IDLE を終えた (断った、切れた)
+        result.future.whenComplete { _ in race.serverEnded() }
+        do {
+            try await channel.writeAndFlush(IMAPClientHandler.Message.part(.tagged(TaggedCommand(tag: tag, command: .idleStart))))
+        } catch {
+            throw .connectionClosed
+        }
+        let timer = eventLoop.scheduleTask(in: Self.timeAmount(timeout)) {
+            race.finish(.timedOut)
+        }
+        let event = await withTaskCancellationHandler {
+            await race.outcome()
+        } onCancel: {
+            race.finish(.cancelled)
+        }
+        timer.cancel()
+        collector.stopWatchingForChanges(on: eventLoop)
+        if await !race.hasServerEnded() {
+            do {
+                try await channel.writeAndFlush(IMAPClientHandler.Message.part(.idleDone))
+            } catch {
+                throw .connectionClosed
+            }
+            // DONE の返事を待つのは決めた時間まで。来なければ接続を閉じる (閉じると、待っている結果も失敗する)
+            let channel = channel
+            let watchdog = eventLoop.scheduleTask(in: Self.timeAmount(doneTimeout)) {
+                channel.close(promise: nil)
+            }
+            defer { watchdog.cancel() }
+            _ = try await result.wait()
+        } else {
+            _ = try await result.wait()
+        }
+        return event
+    }
+
+    private static func timeAmount(_ duration: Duration) -> TimeAmount {
+        let (seconds, attoseconds) = duration.components
+        return .nanoseconds(seconds * 1_000_000_000 + attoseconds / 1_000_000_000)
+    }
+
     private func run(_ command: Command) async throws(IMAPError) -> [Response] {
         let tag = "C\(nextTag)"
         nextTag += 1
@@ -414,5 +482,45 @@ enum FetchAssembler {
             }
         }
         return results
+    }
+}
+
+/// IDLE の「どれが先に来たか」をまとめる。状態はイベントループの上でだけ触る。
+private final class IdleRace: @unchecked Sendable {
+    private let eventLoop: EventLoop
+    private let promise: EventLoopPromise<IMAPIdleEvent>
+    private var finished = false
+    private var ended = false
+
+    init(eventLoop: EventLoop) {
+        self.eventLoop = eventLoop
+        promise = eventLoop.makePromise(of: IMAPIdleEvent.self)
+    }
+
+    /// 最初に来たものだけを結果にする。
+    func finish(_ event: IMAPIdleEvent) {
+        eventLoop.execute {
+            guard !self.finished else { return }
+            self.finished = true
+            self.promise.succeed(event)
+        }
+    }
+
+    func serverEnded() {
+        eventLoop.execute {
+            self.ended = true
+            if !self.finished {
+                self.finished = true
+                self.promise.succeed(.changed)
+            }
+        }
+    }
+
+    func outcome() async -> IMAPIdleEvent {
+        (try? await promise.futureResult.get()) ?? .changed
+    }
+
+    func hasServerEnded() async -> Bool {
+        (try? await eventLoop.submit { self.ended }.get()) ?? true
     }
 }

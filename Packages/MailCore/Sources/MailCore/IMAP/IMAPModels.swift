@@ -126,6 +126,16 @@ public struct IMAPFetchedHeader: Sendable, Hashable {
     }
 }
 
+/// IDLE で待った結果 (T20a)。
+public enum IMAPIdleEvent: Sendable, Equatable {
+    /// フォルダが変わった (新しいメール・削除・フラグの変更)。
+    case changed
+    /// 決めた時間がたった。何も起きていない。
+    case timedOut
+    /// 待っている作業が止められた。
+    case cancelled
+}
+
 public enum IMAPError: Error, Equatable, CustomStringConvertible {
     /// サーバーにつながらない (名前が引けない、拒否された、TLS の失敗など)。
     case connectionFailed(String)
