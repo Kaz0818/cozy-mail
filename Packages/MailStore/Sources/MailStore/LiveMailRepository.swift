@@ -50,29 +50,26 @@ public struct LiveMailRepository: MailRepository {
     }
 
     public func messages(in selection: MailboxSelection, filter: MessageFilter) async throws -> [MessageSummary] {
-        try await visibleSummaries()
-            .filter { selection.contains($0) && filter.matches($0) }
-            .sorted { $0.date > $1.date }
+        // 絞り込みと並べ替えは保存先に任せる (何年分あっても、全部を読み込まない)
+        try await store.summaries(matching: MessageQuery(accounts: registeredAccountIDs(), selection: selection, filter: filter))
     }
 
     /// 受信トレイ (と、それを絞り込んだ「未読」) は、サーバーから聞いた数があればそれを使う。
     /// まだ聞けていないアカウントと、ほかのフォルダは、保存しているメールを数える。
     public func unreadCount(in selection: MailboxSelection) async throws -> Int {
-        let summaries = try await visibleSummaries()
-        let localCount = { (account: AccountID?) in
-            summaries.count { message in
-                (account == nil || message.accountID == account) && selection.contains(message) && !message.isRead
-            }
+        let registered = try await accountList()
+        let localCount = { (accounts: Set<AccountID>) in
+            try await store.unreadCount(matching: MessageQuery(accounts: accounts, selection: selection))
         }
-        guard selection.role == .inbox || selection.role == .unread else { return localCount(selection.accountID) }
+        guard selection.role == .inbox || selection.role == .unread else { return try await localCount(Set(registered.map(\.id))) }
 
-        let accounts = try await accountList().filter { selection.accountID == nil || $0.id == selection.accountID }
+        let accounts = registered.filter { selection.accountID == nil || $0.id == selection.accountID }
         var total = 0
         for account in accounts {
             if let fromServer = try await store.inboxUnreadCount(account: account.id) {
                 total += fromServer
             } else {
-                total += localCount(account.id)
+                total += try await localCount([account.id])
             }
         }
         return total
@@ -276,9 +273,8 @@ public struct LiveMailRepository: MailRepository {
         }
     }
 
-    /// 登録中のアカウントのメールだけ。
-    private func visibleSummaries() async throws -> [MessageSummary] {
-        let ids = Set(try await accountList().map(\.id))
-        return try await store.allSummaries().filter { ids.contains($0.accountID) }
+    /// 登録中のアカウント (削除したアカウントのメールは出さない)。
+    private func registeredAccountIDs() async throws -> Set<AccountID> {
+        Set(try await accountList().map(\.id))
     }
 }

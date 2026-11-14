@@ -248,6 +248,20 @@ public actor SwiftDataMessageStore: MessageStore {
             .map { Self.stored($0).summary }
     }
 
+    public func summaries(matching query: MessageQuery) throws -> [MessageSummary] {
+        guard let predicate = Self.predicate(for: query, unreadOnly: false) else { return [] }
+        let descriptor = FetchDescriptor<MailRecord>(
+            predicate: predicate,
+            sortBy: [SortDescriptor(\.date, order: .reverse)]
+        )
+        return try modelContext.fetch(descriptor).map { Self.stored($0).summary }
+    }
+
+    public func unreadCount(matching query: MessageQuery) throws -> Int {
+        guard let predicate = Self.predicate(for: query, unreadOnly: true) else { return 0 }
+        return try modelContext.fetchCount(FetchDescriptor<MailRecord>(predicate: predicate))
+    }
+
     public func message(id: MessageID) throws -> StoredMessage? {
         let key = id.rawValue
         return try fetchOne(FetchDescriptor<MailRecord>(predicate: #Predicate { $0.key == key })).map(Self.stored)
@@ -318,6 +332,48 @@ public actor SwiftDataMessageStore: MessageStore {
         var descriptor = descriptor
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first
+    }
+
+    /// `MessageQuery` をデータベースの条件にする。`MessageQuery.matches` (画面の決まり) と同じ結果になること
+    /// (`MessageQueryTests` で、すべてのフォルダと絞り込みの組み合わせを比べている)。
+    /// 対象のアカウントが 1 つもないときは nil (何も合わない。空の `IN ()` をデータベースに渡さないため)。
+    private static func predicate(for query: MessageQuery, unreadOnly: Bool) -> Predicate<MailRecord>? {
+        let selection = query.selection
+        let accountIDs = query.accounts
+            .filter { selection.accountID == nil || $0 == selection.accountID }
+            .map(\.rawValue)
+        guard !accountIDs.isEmpty else { return nil }
+
+        // フォルダの条件
+        var role: String? = selection.role.rawValue
+        var mustBeUnread = unreadOnly || query.filter == .unread
+        var mustBeStarred = query.filter == .starred
+        var hidesJunkAndTrash = false
+        switch selection.role {
+        case .starred:
+            // スター付き: 迷惑メールとゴミ箱を除く、どのフォルダでも
+            role = nil
+            mustBeStarred = true
+            hidesJunkAndTrash = true
+        case .unread:
+            // 未読: 受信トレイの未読
+            role = MailboxRole.inbox.rawValue
+            mustBeUnread = true
+        default:
+            break
+        }
+        let anyRole = role == nil
+        let roleValue = role ?? ""
+        let junk = MailboxRole.junk.rawValue
+        let trash = MailboxRole.trash.rawValue
+
+        return #Predicate<MailRecord> { record in
+            accountIDs.contains(record.accountID)
+                && (anyRole || record.role == roleValue)
+                && (!mustBeUnread || !record.isRead)
+                && (!mustBeStarred || record.isStarred)
+                && (!hidesJunkAndTrash || (record.role != junk && record.role != trash))
+        }
     }
 
     /// アカウントとフォルダ名を 1 つの文字列にする (どちらにも現れない区切り文字を使う)。
