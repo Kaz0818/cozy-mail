@@ -1,7 +1,10 @@
 # CLAUDE.md — Cozy Mail で作業する Claude へ
 
-これまで (〜2026-11-14) はクラウドの Linux 環境で作業してきた。ここからはオーナーの Mac (ローカル) でも作業する。
-このファイルは、そのやり方をローカルの Claude に引き継ぐためのもの。仕様は [SPEC.md](SPEC.md)、計画は [tasks/plan.md](tasks/plan.md)、タスクは [tasks/todo.md](tasks/todo.md)。
+このプロジェクトは、オーナーの Mac (ローカル) と、クラウド (claude.ai/code の Linux) の 2 か所で作業する。
+このファイルは、どちらの Claude も守る作業のやり方。仕様は [SPEC.md](SPEC.md)、計画は [tasks/plan.md](tasks/plan.md)、タスクは [tasks/todo.md](tasks/todo.md)。
+
+**作業を始める前に、必ず [docs/handoff.md](docs/handoff.md) (引き継ぎ書) を読む。** 今の状況・次にやること・ローカルとクラウドの受け渡し方が書いてある。
+作業を終えるときは、引き継ぎ書の「今の状況」と「作業の記録」を書き直してから終える。
 
 ## オーナーとのやりとり
 
@@ -48,6 +51,7 @@ xcodebuild test -scheme CozyMail -destination 'platform=macOS'
 - プルリクエストでは **Linux のパッケージのテストだけ** が自動で回る (macOS は無料時間を 10 倍の速さで使うため)。
 - macOS のビルドとテストは、main に取り込んだときと、手動実行 (Actions の「Run workflow」でブランチを選ぶ) のときだけ。
 - ローカルで `xcodebuild test` が通っていれば、プルリクエストでの macOS の手動実行は省いてよい。通ったことは報告に書く。
+- クラウドでは `xcodebuild` が使えないので、アプリや SwiftData のコードを変えたら、CI の macOS を手動で動かして結果を確かめる。
 
 ## 作りの決まりごと
 
@@ -72,17 +76,10 @@ xcodebuild test -scheme CozyMail -destination 'platform=macOS'
 - main から作業用のブランチを作り、そこにコミットする。プルリクエストは下書き (draft) で作り、マージはオーナーがする。
 - コミットするファイルは `git add -A` ではなく、名前を指定して足す (関係ないファイルを入れないため)。
 - マージされたら、main を取り込んでから次の作業を始める。
-- 参考用のブランチ `claude/file-message-store`: 「メールをファイルで Mac に保存する」作り (`FileMessageStore` とテスト 10 件)。
-  オーナーが SwiftData を選んだので **マージしない**。テストは SwiftData 版でも流用できる。
+- ローカルとクラウドで、同時に同じブランチを触らない。受け渡しは main を通す (引き継ぎ書の 1 章)。
+- 参考用のブランチ `claude/file-message-store` は **マージしない** (引き継ぎ書を参照)。
 
-## 今の状況 (2026-11-14)
+## 今の状況
 
-- 済: T1〜T8、T11、T12、T14〜T18 (アカウント追加、受信、一覧、本文、整理の操作、右クリック、ショートカット、作成・返信・送信など)。
-- **次: T10 の残り「メールを Mac に保存する」を SwiftData で作る。** 古いメールも何年分も Mac に置ける作りにする (オーナーの希望)。
-  - `MessageStore` プロトコルに合わせた `SwiftDataMessageStore` を Apple 専用のターゲットに作り、`MailService.live()` で `InMemoryMessageStore` と差し替える
-    (UI テストとプレビューはメモリ上のまま)。
-  - 受け入れ条件: 保存 → 閉じる → 開き直すと、同じメール・同期の進み具合・開いたメールの本文が戻る。開き直したあとの同期は新しいメールだけを取る。
-    アカウントを削除すると、そのメールも消える。
-  - SPEC.md の「Mac 内の保存」と「先に相談する」、tasks の T10 も合わせて直す。
-- そのあと: T13 (アカウントごとのフォルダ・Gmail のラベル)、T19 (検索)。T9 は保留。
-- 署名とキーチェーンの確認を減らす方法は [docs/signing.md](docs/signing.md)。
+[docs/handoff.md](docs/handoff.md) に書く (ここには書かない。情報を 1 か所にまとめるため)。
+署名とキーチェーンの確認を減らす方法は [docs/signing.md](docs/signing.md)。
