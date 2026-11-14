@@ -87,7 +87,7 @@ extension MailRepository {
 }
 
 /// メールに対する整理の操作 (T15)。
-public enum MessageAction: Sendable, Hashable {
+public enum MessageAction: String, Sendable, Hashable, Codable {
     case markRead
     case markUnread
     case star

@@ -51,6 +51,8 @@ final class MailService {
     let signatures: SignatureStore
     /// Mac に保存した下書き (T23a)。
     let drafts: DraftStore
+    /// オフラインの待ち行列 (T22)。つながらないときの整理の操作をためて、同期の前に送る。
+    let pendingActions: PendingActionQueue
     /// サーバー側の検索で見つけたメールを、アプリを開いている間だけ覚えておく (T27)。
     private let serverSearchResults = ServerSearchCache()
     private let store: any MessageStore
@@ -124,9 +126,13 @@ final class MailService {
         drafts: DraftStore = DraftStore(
             directory: FileManager.default.temporaryDirectory.appendingPathComponent("CozyMailDrafts-\(UUID().uuidString)")
         ),
-        serverDrafts: ServerDraftHooks? = nil
+        serverDrafts: ServerDraftHooks? = nil,
+        pendingActions: PendingActionQueue = PendingActionQueue(
+            fileURL: FileManager.default.temporaryDirectory.appendingPathComponent("CozyMailPending-\(UUID().uuidString).json")
+        )
     ) {
         self.directory = directory
+        self.pendingActions = pendingActions
         self.signatures = signatures
         self.drafts = drafts
         self.store = store
@@ -164,7 +170,8 @@ final class MailService {
             serverDrafts: ServerDraftHooks(
                 upload: { try await server.upload($0) },
                 remove: { try await server.remove(id: $0, accountID: $1) }
-            )
+            ),
+            pendingActions: makeLivePendingActions()
         )
         accounts.service = service
         notifier.onOpen = { [weak service] id in service?.requestOpen(id) }
@@ -206,6 +213,13 @@ final class MailService {
         let base = (try? SwiftDataMessageStore.defaultDirectory().deletingLastPathComponent())
             ?? FileManager.default.temporaryDirectory.appendingPathComponent("CozyMail")
         return DraftStore(directory: base.appendingPathComponent("Drafts", isDirectory: true))
+    }
+
+    /// オフラインの待ち行列の保存先 (T22)。下書きと同じフォルダに置く。
+    private static func makeLivePendingActions() -> PendingActionQueue {
+        let base = (try? SwiftDataMessageStore.defaultDirectory().deletingLastPathComponent())
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("CozyMail")
+        return PendingActionQueue(fileURL: base.appendingPathComponent("PendingActions.json"))
     }
 
     /// 下書きを保存した・消した。下書きフォルダを読み直してもらう (T23a)。
@@ -356,7 +370,9 @@ final class MailService {
             // 本文の取得と整理の操作は、そのたびにサーバーにつなぎ、終わったら閉じる
             openSession: { accountID in try await directory.openSession(for: accountID) },
             // 送信も、そのたびに送信用のサーバーにつなぎ、送ったら閉じる
-            openSender: { accountID in try await directory.openSender(for: accountID) }
+            openSender: { accountID in try await directory.openSender(for: accountID) },
+            // つながらないときの整理の操作は、ためておいて同期の前に送る (T22)
+            pendingActions: pendingActions
         )
         // 検索の結果の下で「サーバーで探す」ができる (T27)
         let searchable = ServerSearchRepository(
@@ -451,6 +467,14 @@ final class MailService {
         }
         var failure: String?
         do {
+            // オフラインの間にためた操作を先に送る (T22)。送り終わる前に同期すると、
+            // サーバーの古い状態で Mac の表示が戻ってしまうので、残っているうちは同期しない
+            let flushed = try await pendingActions.flush(account: account.id, session: session)
+            if flushed.sent + flushed.dropped > 0 { revision += 1 }
+            guard await !pendingActions.hasPending(account: account.id) else {
+                await session.close()
+                return nil
+            }
             let report = try await engine.sync(account: account, session: session)
             notifyNewMail(report.newInboxMessages)
         } catch {
@@ -536,6 +560,7 @@ final class MailService {
             syncError = Self.describe(error)
         }
         try? await signatures.remove(id)
+        try? await pendingActions.removeAll(account: id)
         await reloadAccounts()
         restartWatching()
     }

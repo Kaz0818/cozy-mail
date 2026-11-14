@@ -12,6 +12,7 @@ public struct LiveMailRepository: MailRepository {
     private let fetchMessage: MessageFetcher?
     private let openSession: SessionOpener?
     private let openSender: SenderOpener?
+    private let pendingActions: PendingActionQueue?
     private let now: @Sendable () -> Date
 
     /// - Parameters:
@@ -19,15 +20,19 @@ public struct LiveMailRepository: MailRepository {
     ///   - fetchMessage: まだ保存していない本文をサーバーから取る。nil なら `openSession` で取る。
     ///   - openSession: 整理の操作 (と本文の取得、送ったメールの保存) のためにサーバーにつなぐ。使い終わったら閉じる。
     ///   - openSender: 送信のために、送信用のサーバー (SMTP) につなぐ。
+    ///   - pendingActions: オフラインの待ち行列 (T22)。あれば、つながらないときの整理の操作をためて、あとで送る。
+    ///     nil なら、つながらないときは元に戻して投げる。
     public init(
         store: any MessageStore,
         accounts: @escaping @Sendable () async throws -> [Account],
         fetchMessage: MessageFetcher? = nil,
         openSession: SessionOpener? = nil,
         openSender: SenderOpener? = nil,
+        pendingActions: PendingActionQueue? = nil,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.store = store
+        self.pendingActions = pendingActions
         accountList = accounts
         self.openSession = openSession
         self.openSender = openSender
@@ -230,26 +235,37 @@ public struct LiveMailRepository: MailRepository {
             try await store.setInboxUnreadCount(max(0, previousUnread + delta), account: account.id)
         }
 
+        let pending = PendingAction(
+            accountID: account.id, action: action, mailbox: first.old.mailbox, uids: changes.map(\.old.uid),
+            destination: destination, gmail: gmail, queuedAt: now()
+        )
+
+        // 前にためた操作がまだあるなら、順番を守るため後ろに並べて、まとめて送る (T22)
+        if let pendingActions, await pendingActions.hasPending(account: account.id) {
+            try await pendingActions.append(pending)
+            await flushPendingActions(account: account.id, openSession: openSession)
+            return
+        }
+
         do {
             try await Self.using(openSession, account: account.id) { session in
-                let mailbox = first.old.mailbox
-                let uids = changes.map(\.old.uid)
-                switch action {
-                case .markRead, .markUnread:
-                    try await session.setFlags(["\\Seen"], add: action == .markRead, in: mailbox, uids: uids)
-                case .star, .unstar:
-                    try await session.setFlags(["\\Flagged"], add: action == .star, in: mailbox, uids: uids)
-                case .archive where gmail:
-                    try await session.setGmailLabels(["\\Inbox"], add: false, in: mailbox, uids: uids)
-                case .archive, .moveToTrash, .markAsJunk:
-                    guard let destination else { throw MailRepositoryError.actionNotApplicable }
-                    try await session.move(uids: uids, from: mailbox, to: destination)
-                }
+                try await pending.send(on: session)
             }
+        } catch let error where pendingActions != nil && PendingAction.isOffline(error) {
+            // つながらない: Mac の表示はそのままにして、ためておく。つながったら送る (T22)
+            try await pendingActions?.append(pending)
         } catch {
             try? await store.upsert(changes.map(\.old))
             if let previousUnread { try? await store.setInboxUnreadCount(previousUnread, account: account.id) }
             throw error
+        }
+    }
+
+    /// ためた操作を送ってみる。つながらなければ、ためたままにする (失敗は投げない)。
+    private func flushPendingActions(account: AccountID, openSession: SessionOpener) async {
+        guard let pendingActions else { return }
+        _ = try? await Self.using(openSession, account: account) { session in
+            try await pendingActions.flush(account: account, session: session)
         }
     }
 
