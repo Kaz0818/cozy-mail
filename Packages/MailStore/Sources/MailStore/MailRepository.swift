@@ -18,6 +18,8 @@ public protocol MailRepository: Sendable {
     func attachmentData(for id: MessageID, index: Int) async throws -> Data
     /// 既読・スター・アーカイブ・削除・迷惑メール。画面にはすぐ反映し、サーバーが断ったら元に戻して投げる。
     func perform(_ action: MessageAction, on id: MessageID) async throws
+    /// まとめて操作する (T26)。できないメールは飛ばす。失敗があれば、ほかを済ませてから最初の失敗を投げる。
+    func perform(_ action: MessageAction, on ids: [MessageID]) async throws
     /// 返信・転送のための、元のメールの情報 (T18)。
     func replySource(for id: MessageID) async throws -> ReplySource
     /// メールを送る (T18)。送ったあと、Gmail 以外は「送信済み」フォルダにも入れる。
@@ -49,6 +51,22 @@ extension MailRepository {
 
     public func send(_ draft: Draft) async throws -> SendOutcome {
         throw MailRepositoryError.actionUnavailable
+    }
+
+    /// まとめての操作の既定: 1 通ずつ行う。1 通だけならその結果をそのまま返し、複数ならできないメールは飛ばす。
+    public func perform(_ action: MessageAction, on ids: [MessageID]) async throws {
+        if ids.count == 1, let id = ids.first { return try await perform(action, on: id) }
+        var firstError: (any Error)?
+        for id in ids {
+            do {
+                try await perform(action, on: id)
+            } catch MailRepositoryError.actionNotApplicable {
+                continue
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
+        if let firstError { throw firstError }
     }
 }
 

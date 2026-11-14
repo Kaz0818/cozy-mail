@@ -34,7 +34,10 @@ struct MessageCommands: Commands {
         }
 
         CommandMenu("メッセージ") {
-            let message = model?.selectedMessage
+            // 返信・転送は 1 通を選んでいるときだけ。ほかの操作は、選んでいるすべてに効く (T26)
+            let message = model?.isMultiSelecting == true ? nil : model?.selectedMessage
+            let read = model?.readToggleAction
+            let star = model?.starToggleAction
             // 作成ウィンドウが前にあるときだけ押せる
             Button("送信") {
                 guard let compose else { return }
@@ -58,12 +61,12 @@ struct MessageCommands: Commands {
             Button("前のメール (↑ または K)") { run { await $0.selectPrevious() } }
                 .disabled(model?.messages.isEmpty ?? true)
             Divider()
-            Button(message?.isRead == false ? "既読にする" : "未読にする") { run { await $0.toggleRead() } }
+            Button(read == .markRead ? "既読にする" : "未読にする") { run { await $0.toggleRead() } }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
-                .disabled(!can(message?.isRead == false ? .markRead : .markUnread))
-            Button(message?.isStarred == true ? "スターを外す (S)" : "スターを付ける (S)") { run { await $0.toggleStar() } }
+                .disabled(!can(read))
+            Button(star == .unstar ? "スターを外す (S)" : "スターを付ける (S)") { run { await $0.toggleStar() } }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
-                .disabled(!can(message?.isStarred == true ? .unstar : .star))
+                .disabled(!can(star))
             Divider()
             Button("アーカイブ (E)") { run { await $0.perform(.archive) } }
                 .keyboardShortcut("a", modifiers: [.command, .control])
@@ -82,9 +85,9 @@ struct MessageCommands: Commands {
         openWindow(id: CozyMailApp.composeWindowID, value: ComposeRequest.replying(kind, to: id))
     }
 
-    private func can(_ action: MessageAction) -> Bool {
-        guard let model else { return false }
-        return model.canPerform(action, on: model.selectedMessage)
+    private func can(_ action: MessageAction?) -> Bool {
+        guard let model, let action else { return false }
+        return model.canPerformOnSelection(action)
     }
 
     private func run(_ work: @escaping @MainActor (InboxModel) async -> Void) {
@@ -100,6 +103,11 @@ struct MessageListKeys: ViewModifier {
 
     func body(content: Content) -> some View {
         content.onKeyPress(phases: .down) { press in
+            // ⌘A: 一覧のすべてを選ぶ (T26)
+            if press.modifiers == .command, press.characters.lowercased() == "a" {
+                model.selectAll()
+                return .handled
+            }
             guard press.modifiers.isDisjoint(with: [.command, .control, .option]) else { return .ignored }
             guard let action = Self.action(for: press.key, characters: press.characters) else { return .ignored }
             Task { await action(model) }

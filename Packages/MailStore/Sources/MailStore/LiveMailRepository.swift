@@ -121,11 +121,62 @@ public struct LiveMailRepository: MailRepository {
               let account = accounts.first(where: { $0.id == stored.summary.accountID }) else {
             throw MailRepositoryError.messageNotFound(id)
         }
-        let gmail = account.provider == .gmail
 
         // 1. 何をするかを決める (できない操作や、移す先のフォルダがないときは、何も変えずに断る)
+        let destination = try await destination(for: action, account: account, mailbox: stored.summary.mailbox)
+        let updated = try Self.applying(action, to: stored, gmail: account.provider == .gmail)
+        guard updated != stored else { return }
+
+        // 2. 画面にすぐ出るよう先に保存先を変え、3. サーバーに送る。断られたら元に戻して投げる
+        try await commit([(stored, updated)], action: action, account: account, destination: destination, openSession: openSession)
+    }
+
+    /// まとめて操作する (T26)。アカウントとフォルダごとにまとめて、サーバーへは 1 回で送る。
+    /// - できないメール (受信トレイ以外のアーカイブなど) と、もうそうなっているメールは飛ばす。
+    /// - あるサーバーが断ったら、そのまとまりだけ元に戻し、ほかは続けて、最後に最初の失敗を投げる。
+    /// - 1 通だけのときは `perform(_:on:)` と同じ (できない操作は断る)。
+    public func perform(_ action: MessageAction, on ids: [MessageID]) async throws {
+        if ids.count == 1, let id = ids.first { return try await perform(action, on: id) }
+        guard let openSession else { throw MailRepositoryError.actionUnavailable }
+        let accounts = try await accountList()
+
+        // アカウントとフォルダごとに分ける (選んだ順を保つ)
+        struct GroupKey: Hashable { let account: AccountID; let mailbox: String }
+        var groups: [GroupKey: [StoredMessage]] = [:]
+        var order: [GroupKey] = []
+        for id in ids {
+            guard let stored = try await store.message(id: id) else { continue }
+            let key = GroupKey(account: stored.summary.accountID, mailbox: stored.mailbox)
+            if groups[key] == nil { order.append(key) }
+            groups[key, default: []].append(stored)
+        }
+
+        var firstError: (any Error)?
+        for key in order {
+            guard let account = accounts.first(where: { $0.id == key.account }), let messages = groups[key] else { continue }
+            do {
+                let gmail = account.provider == .gmail
+                var changes: [(StoredMessage, StoredMessage)] = []
+                var destination: String?
+                for stored in messages {
+                    guard let updated = try? Self.applying(action, to: stored, gmail: gmail), updated != stored else { continue }
+                    if changes.isEmpty {
+                        destination = try await self.destination(for: action, account: account, mailbox: stored.summary.mailbox)
+                    }
+                    changes.append((stored, updated))
+                }
+                guard !changes.isEmpty else { continue }
+                try await commit(changes, action: action, account: account, destination: destination, openSession: openSession)
+            } catch {
+                if firstError == nil { firstError = error }
+            }
+        }
+        if let firstError { throw firstError }
+    }
+
+    /// 操作したあとのメール (保存先に書く形)。このメールにできない操作なら `actionNotApplicable`。
+    private static func applying(_ action: MessageAction, to stored: StoredMessage, gmail: Bool) throws -> StoredMessage {
         var updated = stored
-        var destination: String?
         switch action {
         case .markRead: updated.summary.isRead = true
         case .markUnread: updated.summary.isRead = false
@@ -137,30 +188,52 @@ public struct LiveMailRepository: MailRepository {
             updated.summary.mailbox = .archive
             if gmail {
                 updated.labels = stored.labels.filter { $0.caseInsensitiveCompare("\\Inbox") != .orderedSame }
-            } else {
-                destination = try await folder(for: .archive, account: account.id)
             }
         case .moveToTrash, .markAsJunk:
             let role: MailboxRole = action == .moveToTrash ? .trash : .junk
             guard stored.summary.mailbox != role else { throw MailRepositoryError.actionNotApplicable }
             updated.summary.mailbox = role
-            destination = try await folder(for: role, account: account.id)
         }
-        guard updated != stored else { return }
+        return updated
+    }
 
-        // 2. 画面にすぐ出るよう、先に保存先を変える (受信トレイの未読数も合わせる)
+    /// 移す先のフォルダ (移す操作のときだけ)。Gmail のアーカイブはラベルを外すだけなので要らない。
+    /// 先にできるかを確かめ、できない操作ならフォルダを探さずに断る (`applying` と同じ順)。
+    private func destination(for action: MessageAction, account: Account, mailbox: MailboxRole) async throws -> String? {
+        switch action {
+        case .markRead, .markUnread, .star, .unstar:
+            return nil
+        case .archive:
+            guard mailbox == .inbox else { throw MailRepositoryError.actionNotApplicable }
+            return account.provider == .gmail ? nil : try await folder(for: .archive, account: account.id)
+        case .moveToTrash, .markAsJunk:
+            let role: MailboxRole = action == .moveToTrash ? .trash : .junk
+            guard mailbox != role else { throw MailRepositoryError.actionNotApplicable }
+            return try await folder(for: role, account: account.id)
+        }
+    }
+
+    /// 同じアカウント・同じフォルダのメールの変更を、保存先に書いてからサーバーに 1 回で送る。
+    /// サーバーが断ったら、保存先を元に戻して投げる。
+    private func commit(
+        _ changes: [(old: StoredMessage, new: StoredMessage)], action: MessageAction, account: Account,
+        destination: String?, openSession: SessionOpener
+    ) async throws {
+        guard let first = changes.first else { return }
+        let gmail = account.provider == .gmail
+
+        // 画面にすぐ出るよう、先に保存先を変える (受信トレイの未読数も合わせる)
         let previousUnread = try await store.inboxUnreadCount(account: account.id)
-        try await store.upsert([updated])
-        let delta = Self.unreadInboxCount(updated) - Self.unreadInboxCount(stored)
+        try await store.upsert(changes.map(\.new))
+        let delta = changes.reduce(0) { $0 + Self.unreadInboxCount($1.new) - Self.unreadInboxCount($1.old) }
         if delta != 0, let previousUnread {
             try await store.setInboxUnreadCount(max(0, previousUnread + delta), account: account.id)
         }
 
-        // 3. サーバーに送る。断られたら、保存先を元に戻して投げる
         do {
             try await Self.using(openSession, account: account.id) { session in
-                let mailbox = stored.mailbox
-                let uids = [stored.uid]
+                let mailbox = first.old.mailbox
+                let uids = changes.map(\.old.uid)
                 switch action {
                 case .markRead, .markUnread:
                     try await session.setFlags(["\\Seen"], add: action == .markRead, in: mailbox, uids: uids)
@@ -174,7 +247,7 @@ public struct LiveMailRepository: MailRepository {
                 }
             }
         } catch {
-            try? await store.upsert([stored])
+            try? await store.upsert(changes.map(\.old))
             if let previousUnread { try? await store.setInboxUnreadCount(previousUnread, account: account.id) }
             throw error
         }
