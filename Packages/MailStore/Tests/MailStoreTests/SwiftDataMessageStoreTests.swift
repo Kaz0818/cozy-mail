@@ -227,6 +227,83 @@ import Testing
         #expect(try await reopened.messages(account: yahoo, mailbox: "INBOX").map(\.summary.subject).sorted() == ["one", "three", "two"])
     }
 
+    // MARK: - 開き直さずに続けて使う (アプリが動いている間)
+
+    /// 1 回の保存に同じ ID が 2 通あっても失敗せず、あとのほうが残る (メモリ上の保存先と同じ)。
+    @Test func duplicateIDsInOneUpsertKeepTheLastOne() async throws {
+        let folder = Folder()
+        let store = try open(folder)
+        let first = message(1, account: yahoo, subject: "前")
+        var second = first
+        second.summary.subject = "後"
+
+        try await store.upsert([first, second])
+
+        #expect(try await store.allSummaries() == [second.summary])
+        let reopened = try open(folder)
+        #expect(try await reopened.allSummaries() == [second.summary])
+    }
+
+    /// 消したあと、同じ保存先のまま続けて使っても、消したものが見えたり、保存し直せなくなったりしない。
+    @Test func deletingThenReusingTheSameStoreWorks() async throws {
+        let folder = Folder()
+        let store = try open(folder)
+        let item = message(1, account: yahoo)
+        try await store.upsert([item])
+        try await store.setRawMessage(Data("raw".utf8), for: item.summary.id)
+        try await store.setInboxUnreadCount(5, account: yahoo)
+        try await store.setMailboxNames([.trash: "Trash"], account: yahoo)
+        try await store.setSyncState(MailboxSyncState(uidValidity: 1, highestUID: 1), account: yahoo, mailbox: "INBOX")
+        // 一度読んでおく (読み込んだものが残っていても、消したあとに見えないこと)
+        _ = try await store.rawMessage(for: item.summary.id)
+        _ = try await store.inboxUnreadCount(account: yahoo)
+        _ = try await store.syncState(account: yahoo, mailbox: "INBOX")
+
+        try await store.deleteAccount(yahoo)
+
+        #expect(try await store.allSummaries().isEmpty)
+        #expect(try await store.rawMessage(for: item.summary.id) == nil)
+        #expect(try await store.inboxUnreadCount(account: yahoo) == nil)
+        #expect(try await store.mailboxName(for: .trash, account: yahoo) == nil)
+        #expect(try await store.syncState(account: yahoo, mailbox: "INBOX") == nil)
+
+        // 同じアカウントを追加し直して、また保存できる
+        try await store.upsert([item])
+        try await store.setRawMessage(Data("raw 2".utf8), for: item.summary.id)
+        try await store.setInboxUnreadCount(7, account: yahoo)
+        try await store.setMailboxNames([.sent: "Sent"], account: yahoo)
+        try await store.setSyncState(MailboxSyncState(uidValidity: 2, highestUID: 9), account: yahoo, mailbox: "INBOX")
+
+        let reopened = try open(folder)
+        #expect(try await reopened.allSummaries() == [item.summary])
+        #expect(try await reopened.rawMessage(for: item.summary.id) == Data("raw 2".utf8))
+        #expect(try await reopened.inboxUnreadCount(account: yahoo) == 7)
+        #expect(try await reopened.mailboxName(for: .sent, account: yahoo) == "Sent")
+        #expect(try await reopened.mailboxName(for: .trash, account: yahoo) == nil)
+        #expect(try await reopened.syncState(account: yahoo, mailbox: "INBOX") == MailboxSyncState(uidValidity: 2, highestUID: 9))
+    }
+
+    /// `UIDVALIDITY` が変わって取り直すとき: フォルダを消して、すぐ同じ UID で入れ直しても正しく残る。
+    @Test func deleteAllThenRefillTheSameFolder() async throws {
+        let folder = Folder()
+        let store = try open(folder)
+        let old = message(1, account: yahoo, subject: "古い")
+        try await store.upsert([old])
+        try await store.setRawMessage(Data("old raw".utf8), for: old.summary.id)
+        _ = try await store.messages(account: yahoo, mailbox: "INBOX")
+
+        try await store.deleteAll(account: yahoo, mailbox: "INBOX")
+        var refilled = old
+        refilled.summary.subject = "新しい"
+        try await store.upsert([refilled])
+
+        #expect(try await store.messages(account: yahoo, mailbox: "INBOX") == [refilled])
+        #expect(try await store.rawMessage(for: old.summary.id) == nil)
+        let reopened = try open(folder)
+        #expect(try await reopened.messages(account: yahoo, mailbox: "INBOX") == [refilled])
+        #expect(try await reopened.rawMessage(for: old.summary.id) == nil)
+    }
+
     // MARK: - 何年分も置ける
 
     /// 5 年分 (3 アカウント・約 6,000 通) を保存して開き直しても、フォルダごとの取り出しと数が合う。

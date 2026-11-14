@@ -195,7 +195,7 @@ public actor SwiftDataMessageStore: MessageStore {
     public func upsert(_ messages: [StoredMessage]) throws {
         for chunk in messages.chunked(Self.chunkSize) {
             let keys = chunk.map(\.summary.id.rawValue)
-            let existing = try Dictionary(
+            var existing = try Dictionary(
                 modelContext.fetch(FetchDescriptor<MailRecord>(predicate: #Predicate { keys.contains($0.key) })).map { ($0.key, $0) },
                 uniquingKeysWith: { first, _ in first }
             )
@@ -203,7 +203,10 @@ public actor SwiftDataMessageStore: MessageStore {
                 if let record = existing[message.summary.id.rawValue] {
                     Self.fill(record, from: message)
                 } else {
-                    modelContext.insert(Self.record(from: message))
+                    let record = Self.record(from: message)
+                    modelContext.insert(record)
+                    // 同じ ID がこのあとにもう一度来たら、新しく作らずにこれを上書きする
+                    existing[message.summary.id.rawValue] = record
                 }
             }
         }
