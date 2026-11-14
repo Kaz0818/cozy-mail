@@ -18,6 +18,8 @@ actor FakeMailServer: MailServerSession {
         var to = ""
         /// Message-ID (`<>` なし)。nil なら `<UID@example.com>`。
         var messageID: String?
+        /// 本文。nil なら `body <UID>`。
+        var body: String?
     }
 
     struct Folder {
@@ -108,7 +110,19 @@ actor FakeMailServer: MailServerSession {
         guard let message = try folder(mailbox).messages.first(where: { $0.uid == uid }) else {
             throw FakeServerError.noSuchMailbox("\(mailbox) uid \(uid)")
         }
-        return Data("Subject: \(message.subject)\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nbody \(uid)\r\n".utf8)
+        let text = message.body ?? "body \(uid)"
+        return Data("Subject: \(message.subject)\r\nFrom: \(message.from)\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n\(text)\r\n".utf8)
+    }
+
+    /// サーバー側の検索 (T27): 件名・差出人・本文のどこかに、言葉を全部含むメール (大文字・小文字は区別しない)。
+    func searchUIDs(in mailbox: String, text: String) async throws -> [UInt32] {
+        calls.append("SEARCH TEXT \(mailbox) \(text)")
+        let words = text.split(whereSeparator: \.isWhitespace).map { $0.lowercased() }
+        guard !words.isEmpty else { return [] }
+        return try folder(mailbox).messages.filter { message in
+            let haystack = "\(message.subject) \(message.from) \(message.body ?? "body \(message.uid)")".lowercased()
+            return words.allSatisfy { haystack.contains($0) }
+        }.map(\.uid).sorted()
     }
 
     /// true にすると、次の書き込み (フラグ・ラベル・移動) が失敗する。

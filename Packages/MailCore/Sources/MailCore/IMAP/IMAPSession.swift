@@ -301,6 +301,27 @@ public actor IMAPSession {
         }
     }
 
+    // MARK: - サーバー側の検索 (T27)
+
+    /// 件名・差出人・本文などのどこかに、言葉を全部含むメールの UID を、小さい順に返す (`UID SEARCH TEXT`)。
+    /// 空白で区切った言葉は「かつ」でつなぐ。日本語などを含むときは `CHARSET UTF-8` を付ける。空白だけなら何もしない。
+    public func searchUIDs(in mailbox: String, text: String) async throws(IMAPError) -> [UInt32] {
+        let words = text.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !words.isEmpty else { return [] }
+        try await ensureExamined(mailbox)
+        let keys = words.map { SearchKey.text(ByteBuffer(string: $0)) }
+        let key = keys.count == 1 ? keys[0] : .and(keys)
+        let charset = text.unicodeScalars.allSatisfy(\.isASCII) ? nil : "UTF-8"
+        let responses = try await run(.uidSearch(key: key, charset: charset))
+        var uids: [UInt32] = []
+        for response in responses {
+            if case let .untagged(.mailboxData(.search(ids, _))) = response {
+                uids.append(contentsOf: ids.map(\.rawValue))
+            }
+        }
+        return uids.sorted()
+    }
+
     // MARK: - サーバーの下書き (T23b)
 
     /// 見出し (`field`) に `value` を含むメールの UID を、小さい順に返す (`UID SEARCH HEADER`)。

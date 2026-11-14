@@ -10,6 +10,9 @@ public protocol MailRepository: Sendable {
     /// Mac に保存したメールから探す (T19)。迷惑メールとゴミ箱を除く、すべてのアカウントとフォルダ。新しい順。
     /// 空白で区切った言葉は、すべてを含むもの。差出人の名前・アドレス・件名・本文の書き出しから探す。
     func search(_ text: String, filter: MessageFilter) async throws -> [MessageSummary]
+    /// サーバーで探す (T27)。Mac に保存していない古いメールや、本文の言葉でも見つかる。新しい順。
+    /// 保存していないメールは `ServerMessage` の番号で返す (開けるが、整理の操作はできない)。
+    func searchServer(_ text: String) async throws -> [MessageSummary]
     /// そのアカウントの Gmail のラベル (自分で作ったもの)。名前順。
     func labels(for account: AccountID) async throws -> [String]
     /// 本文。必要ならサーバーから取る。
@@ -41,6 +44,11 @@ extension MailRepository {
 
     /// 検索に対応していない窓口 (テスト用のものなど) の既定: 見つからない。
     public func search(_ text: String, filter: MessageFilter) async throws -> [MessageSummary] {
+        []
+    }
+
+    /// サーバー側の検索に対応していない窓口 (見本のメール、テスト用のものなど) の既定: 見つからない。
+    public func searchServer(_ text: String) async throws -> [MessageSummary] {
         []
     }
 
