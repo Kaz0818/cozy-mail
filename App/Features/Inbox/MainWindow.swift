@@ -1,4 +1,3 @@
-import AppKit
 import MailStore
 import SwiftUI
 
@@ -39,14 +38,15 @@ struct MainWindow: View {
         .task(id: service.revision) {
             await model.use(service.repository, showingSamples: service.isShowingSamples)
         }
-        // 通知が押されたら、そのメールを開く (T20b)
-        .onChange(of: service.openRequest) { _, request in
+        // 通知やメニューバーから「このメールを開いて」と頼まれたら開く (T20b、T21)。
+        // ウィンドウを開いたときにも、まだ受け取っていない分を受け取る
+        .onChange(of: service.openRequest, initial: true) {
+            guard let request = service.takePendingOpen() else { return }
             Task { await model.show(request.messageID) }
         }
-        // Dock のアイコンの未読数 (T30)。数が変わるたびに付け替える。nil なら外す
-        .onChange(of: model.dockBadgeLabel, initial: true) { _, label in
-            NSApplication.shared.dockTile.badgeLabel = label
-        }
+        // 開いているメインウィンドウの数 (閉じていたら、通知から開くときにウィンドウを開く)
+        .onAppear { service.mainWindowOpened() }
+        .onDisappear { service.mainWindowClosed() }
     }
 }
 

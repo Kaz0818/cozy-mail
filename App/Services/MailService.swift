@@ -54,6 +54,10 @@ final class MailService {
     /// 起動して最初の一斉の同期が済んだか。それまでの新着 (閉じていた間にたまった分) は通知しない。
     private var hasFinishedFirstSync = false
     private(set) var openRequest = OpenRequest()
+    /// まだ画面が受け取っていない「開いて」。ウィンドウを開いたときに `takePendingOpen()` で 1 回だけ受け取る (T21)。
+    private var pendingOpen: OpenRequest?
+    /// 開いているメインウィンドウの数 (T21)。0 なら、通知から開くときにウィンドウを開く。
+    private(set) var mainWindowCount = 0
 
     init(
         directory: AccountDirectory, store: any MessageStore, watchesForNewMail: Bool = false,
@@ -86,7 +90,17 @@ final class MailService {
     /// 通知が押された。画面にそのメールを開いてもらう。
     func requestOpen(_ id: MessageID?) {
         openRequest = OpenRequest(serial: openRequest.serial + 1, messageID: id)
+        pendingOpen = openRequest
     }
+
+    /// まだ受け取っていない「開いて」を受け取る。2 回目からは nil。
+    func takePendingOpen() -> OpenRequest? {
+        defer { pendingOpen = nil }
+        return pendingOpen
+    }
+
+    func mainWindowOpened() { mainWindowCount += 1 }
+    func mainWindowClosed() { mainWindowCount = max(0, mainWindowCount - 1) }
 
     /// Mac の中の保存先。開けなかったとき (ファイルが壊れた、ディスクがいっぱいなど) は、前のようにメモリ上で動かす。
     private static func makeLiveStore() -> any MessageStore {
