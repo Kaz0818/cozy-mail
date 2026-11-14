@@ -1,5 +1,6 @@
 import AccountKit
 import AccountKitKeychain
+import AppKit
 import Foundation
 import MailStore
 import MailStoreSwiftData
@@ -22,18 +23,29 @@ final class MailService {
     let directory: AccountDirectory
     private let store: any MessageStore
     private let engine: SyncEngine
+    /// 受信トレイを見張って新着をすぐ取るか (T20a)。アプリだけ。テストと見本では本物のサーバーにつながないよう見張らない。
+    private let watchesForNewMail: Bool
+    /// アカウントごとの見張りの作業。
+    private var watchers: [AccountID: Task<Void, Never>] = [:]
+    /// いま同期しているアカウントと、同期中にもう一度頼まれたアカウント (終わったらもう 1 回同期する)。
+    private var syncingAccounts: Set<AccountID> = []
+    private var resyncRequested: Set<AccountID> = []
+    /// スリープから戻ったときの知らせの受け取り口。
+    private var wakeObserver: (any NSObjectProtocol)?
 
-    init(directory: AccountDirectory, store: any MessageStore) {
+    init(directory: AccountDirectory, store: any MessageStore, watchesForNewMail: Bool = false) {
         self.directory = directory
         self.store = store
+        self.watchesForNewMail = watchesForNewMail
         engine = SyncEngine(store: store)
     }
 
-    /// アプリで使う組み合わせ: アカウント一覧は UserDefaults、パスワードはキーチェーン。
+    /// アプリで使う組み合わせ: アカウント一覧は UserDefaults、パスワードはキーチェーン。新着を見張る。
     static func live() -> MailService {
         MailService(
             directory: AccountDirectory(storage: UserDefaultsAccountListStorage(), secrets: KeychainSecretStore()),
-            store: makeLiveStore()
+            store: makeLiveStore(),
+            watchesForNewMail: true
         )
     }
 
@@ -77,34 +89,117 @@ final class MailService {
 
     // MARK: - 操作
 
-    /// 起動時: アカウントを読み込んで同期する。
+    /// 起動時: アカウントを読み込んで同期し、新着の見張りを始める。
     func start() async {
         await reloadAccounts()
         await syncAll()
+        observeWake()
+        restartWatching()
     }
 
     /// 全アカウントを順に同期する。1 つが失敗しても、ほかは続ける。
     func syncAll() async {
         guard !isSyncing, !accounts.isEmpty else { return }
         isSyncing = true
-        var failures: [String] = []
+        var failures: [AccountID: String] = [:]
         for account in accounts {
-            do {
-                let session = try await directory.openSession(for: account.id)
-                do {
-                    _ = try await engine.sync(account: account, session: session)
-                } catch {
-                    failures.append("\(account.displayName): \(Self.describe(error))")
-                }
-                await session.close()
-            } catch {
-                failures.append("\(account.displayName): \(Self.describe(error))")
+            // 見張りの同期が走っているアカウントは、それが終わったらもう 1 回同期してもらう
+            guard !syncingAccounts.contains(account.id) else {
+                resyncRequested.insert(account.id)
+                continue
             }
+            syncingAccounts.insert(account.id)
+            if let failure = await syncOne(account) { failures[account.id] = failure }
+            syncingAccounts.remove(account.id)
             // アカウントごとに画面を更新して、終わった分から見えるようにする
             revision += 1
         }
-        syncError = failures.isEmpty ? nil : failures.joined(separator: "\n")
+        accountFailures = failures
         isSyncing = false
+        // 一斉の同期の間に、見張りから頼まれていた分
+        for id in Array(resyncRequested) where !syncingAccounts.contains(id) {
+            await sync(accountID: id)
+        }
+    }
+
+    /// 1 つのアカウントを同期する (新着の知らせを受けたとき)。同期中にまた頼まれたら、
+    /// 同時には走らせず、終わってからもう 1 回だけ同期する (その間に届いたメールを取りこぼさないため)。
+    func sync(accountID id: AccountID) async {
+        guard let account = accounts.first(where: { $0.id == id }) else { return }
+        guard !syncingAccounts.contains(id) else {
+            resyncRequested.insert(id)
+            return
+        }
+        syncingAccounts.insert(id)
+        repeat {
+            resyncRequested.remove(id)
+            let failure = await syncOne(account)
+            accountFailures[id] = failure
+            revision += 1
+        } while resyncRequested.contains(id)
+        syncingAccounts.remove(id)
+    }
+
+    /// アカウントごとの最後の失敗。`syncError` はこれをまとめたもの。
+    private var accountFailures: [AccountID: String] = [:] {
+        didSet {
+            let messages = accounts.compactMap { accountFailures[$0.id] }
+            syncError = messages.isEmpty ? nil : messages.joined(separator: "\n")
+        }
+    }
+
+    /// 1 つのアカウントを同期する。失敗したら、その説明を返す。
+    private func syncOne(_ account: Account) async -> String? {
+        let session: any MailServerSession
+        do {
+            session = try await directory.openSession(for: account.id)
+        } catch {
+            return "\(account.displayName): \(Self.describe(error))"
+        }
+        var failure: String?
+        do {
+            _ = try await engine.sync(account: account, session: session)
+        } catch {
+            failure = "\(account.displayName): \(Self.describe(error))"
+        }
+        await session.close()
+        return failure
+    }
+
+    // MARK: - 新着の見張り (T20a)
+
+    /// アカウントごとの見張りを始め直す (起動・アカウントの追加と削除・スリープから戻ったとき)。
+    func restartWatching() {
+        stopWatching()
+        guard watchesForNewMail else { return }
+        let directory = directory
+        for account in accounts {
+            let id = account.id
+            let watcher = NewMailWatcher(
+                openSession: { try await directory.openSession(for: id) },
+                onChange: { [weak self] in await self?.sync(accountID: id) }
+            )
+            watchers[id] = Task { await watcher.run() }
+        }
+    }
+
+    func stopWatching() {
+        for task in watchers.values { task.cancel() }
+        watchers = [:]
+    }
+
+    /// スリープから戻ったら、切れているはずの接続を待たずに、すぐ見張りをつなぎ直す (1 分以内に再開するため)。
+    private func observeWake() {
+        guard watchesForNewMail, wakeObserver == nil else { return }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.restartWatching()
+                await self.syncAll()
+            }
+        }
     }
 
     /// ログインを確かめてから追加し、そのアカウントを同期する。
@@ -116,6 +211,7 @@ final class MailService {
         )
         await reloadAccounts()
         await syncAll()
+        restartWatching()
     }
 
     /// 差出人の名前 (送ったメールで相手に見える名前) を変える。
@@ -132,6 +228,7 @@ final class MailService {
             syncError = Self.describe(error)
         }
         await reloadAccounts()
+        restartWatching()
     }
 
     private func reloadAccounts() async {
