@@ -31,6 +31,12 @@ struct MainWindow: View {
         .frame(minWidth: 1000, minHeight: 620)
         .ignoresSafeArea()
         .sheet(isPresented: $isAddingAccount) { AddAccountSheet() }
+        // 送信の取り消し (T24)
+        .overlay(alignment: .bottom) {
+            UndoSendBanner()
+                .padding(.bottom, Metrics.panelGap + 16)
+        }
+        .modifier(SendNoticeAlert())
         // メニューバーの「メッセージ」メニューが、このウィンドウのメールに対して動くように
         .focusedSceneValue(\.inboxModel, model)
         .task { await service.start() }

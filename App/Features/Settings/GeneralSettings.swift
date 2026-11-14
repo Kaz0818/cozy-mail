@@ -51,9 +51,19 @@ final class LoginItemSettingsModel {
 /// 設定の「一般」(T21)。
 struct GeneralSettings: View {
     @State private var model = LoginItemSettingsModel(item: SystemLoginItem())
+    @AppStorage(UndoSendSetting.key) private var undoSeconds = UndoSendSetting.defaultSeconds
 
     var body: some View {
         Form {
+            // 送信の取り消し (T24)
+            Picker("送信の取り消し", selection: $undoSeconds) {
+                ForEach(UndoSendSetting.choices, id: \.self) { seconds in
+                    Text(seconds == 0 ? "すぐ送る (取り消さない)" : "\(seconds) 秒").tag(seconds)
+                }
+            }
+            Text("送信を押してから、この秒数のあいだ「送信を取り消す」が出ます。そのあいだにアプリを終えると、先に送ってから終わります。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             Toggle("ログイン時に Cozy Mail を開く", isOn: Binding(
                 get: { model.launchesAtLogin },
                 set: { model.setLaunchesAtLogin($0) }

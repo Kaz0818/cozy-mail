@@ -23,9 +23,15 @@ struct ComposeWindow: View {
         .background(AppBackground())
         .navigationTitle(model?.windowTitle ?? "新規メッセージ")
         .task {
-            let model = ComposeModel(repository: service.repository, signatures: service.signatures)
+            let service = service
+            let model = ComposeModel(
+                repository: service.repository, signatures: service.signatures,
+                sendLater: { await service.sendLater($0) }
+            )
             self.model = model
-            await model.load(request)
+            // 取り消した・送れなかったメールなら、その中身で開く (T24)
+            let restored = request.restoredDraftID.flatMap { service.takeRestoredDraft($0) }
+            await model.load(request, restored: restored)
         }
     }
 

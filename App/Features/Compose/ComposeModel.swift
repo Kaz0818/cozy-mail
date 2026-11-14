@@ -15,10 +15,16 @@ struct ComposeRequest: Codable, Hashable {
     var kind: Kind
     /// 返信・転送する元のメール (`MessageID.rawValue`)。
     var messageID: String?
+    /// 送信を取り消した・送れなかったメールを開き直すとき、`MailService` が預かっている下書きの番号 (T24)。
+    var restoredDraftID: UUID?
     var id = UUID()
 
     static func new() -> ComposeRequest {
         ComposeRequest(kind: .new)
+    }
+
+    static func restoring(_ draftID: UUID) -> ComposeRequest {
+        ComposeRequest(kind: .new, restoredDraftID: draftID)
     }
 
     static func replying(_ kind: Kind, to id: MessageID) -> ComposeRequest {
@@ -70,10 +76,16 @@ final class ComposeModel {
     private var signatureTexts: [AccountID: String] = [:]
     private let repository: any MailRepository
     private let signatures: SignatureStore?
+    /// 送信を取り消せるよう、送るのを預ける先 (T24)。預けたら true。false (0 秒の設定など) なら、ここですぐ送る。
+    private let sendLater: (@MainActor (Draft) async -> Bool)?
 
-    init(repository: any MailRepository, signatures: SignatureStore? = nil) {
+    init(
+        repository: any MailRepository, signatures: SignatureStore? = nil,
+        sendLater: (@MainActor (Draft) async -> Bool)? = nil
+    ) {
         self.repository = repository
         self.signatures = signatures
+        self.sendLater = sendLater
     }
 
     private func signature(for id: AccountID?) -> String {
@@ -81,11 +93,17 @@ final class ComposeModel {
     }
 
     /// 依頼に合わせて中身を作る。返信・転送では元のメールを読み、宛先・件名・引用を入れる。
-    func load(_ request: ComposeRequest, defaultAccount: AccountID? = nil) async {
+    /// `restored` があれば (送信を取り消した・送れなかった)、その中身をそのまま入れる (T24)。
+    func load(_ request: ComposeRequest, defaultAccount: AccountID? = nil, restored: Draft? = nil) async {
         isLoading = true
         defer { isLoading = false }
         accounts = (try? await repository.accounts()) ?? []
         let fallback = defaultAccount ?? accounts.first?.id
+        if let restored {
+            signatureTexts = await signatures?.all() ?? [:]
+            fill(from: restored, fallbackAccount: fallback)
+            return
+        }
         var source: ReplySource?
         if request.kind != .new, let raw = request.messageID {
             do {
@@ -100,6 +118,11 @@ final class ComposeModel {
             request.composeKind, replyingTo: source, myAddresses: accounts.map(\.emailAddress), defaultAccount: fallback,
             signature: signature(for: sender)
         )
+        fill(from: draft, fallbackAccount: fallback)
+    }
+
+    /// 下書きの中身を欄に入れる (読み込み中に呼ぶので、差出人を入れても署名は入れ替えない)。
+    private func fill(from draft: Draft, fallbackAccount fallback: AccountID?) {
         accountID = draft.accountID ?? fallback
         to = Composer.format(draft.to)
         cc = Composer.format(draft.cc)
@@ -123,7 +146,8 @@ final class ComposeModel {
         }
         let draft = Draft(
             accountID: accountID, to: contacts[0], cc: contacts[1], bcc: contacts[2],
-            subject: subject, body: body, attachments: attachments, inReplyTo: inReplyTo, references: references
+            subject: subject, body: body, attachments: attachments, inReplyTo: inReplyTo, references: references,
+            quote: quote
         )
         if let problem = Composer.problem(in: draft) { throw problem }
         return draft
@@ -146,6 +170,11 @@ final class ComposeModel {
         }
         isSending = true
         defer { isSending = false }
+        // 取り消せるよう預けたら、もう送ったものとしてウィンドウを閉じる
+        if let sendLater, await sendLater(draft) {
+            outcome = .sent
+            return
+        }
         do {
             outcome = try await repository.send(draft)
         } catch {
@@ -165,7 +194,7 @@ final class ComposeModel {
         subject.trimmingCharacters(in: .whitespaces).isEmpty ? "新規メッセージ" : subject
     }
 
-    static func describe(_ error: any Error) -> String {
+    nonisolated static func describe(_ error: any Error) -> String {
         switch error {
         case let problem as DraftProblem:
             switch problem {
