@@ -547,14 +547,20 @@
 
 **受け入れ条件:**
 - [ ] 新しい未読メールが受信トレイに入ると、差出人と件名の通知が出る (US-12)
-- [ ] 最初の同期・迷惑メール・すでに既読のメールでは出さない
-- [ ] 一度に 4 通以上来たら、「n 件の新着メール」の 1 つの通知にまとめる
+- [x] 最初の同期・迷惑メール・すでに既読のメールでは出さない
+- [x] 一度に 4 通以上来たら、「n 件の新着メール」の 1 つの通知にまとめる
 - [ ] 通知を押すと、アプリが前に出てそのメールが開く
-- [ ] 設定で通知を切れる
+- [x] 設定で通知を切れる
 
 **確認:**
-- [ ] 🐧 どのメールを通知するかを決める部分 (`NewMailNotifier`、画面と分ける) のテスト
+- [x] 🐧 どのメールを通知するかを決める部分 (`NewMailNotifier`、画面と分ける) のテスト
 - [ ] 🍎 新着で通知が出て、押すとそのメールが開く
+
+> 状態 (2026-11-14): 🐧 済み。同期の結果 (`SyncEngine.Report.newInboxMessages`) に、前回の同期のあとに受信トレイに来た未読メールを入れる (初めての同期では空)。`NewMailNotifier` (MailStore) が通知の中身を決め、アプリの `NotificationService` が Mac の通知センターに出す。押すと `MailService.openRequest` → `InboxModel.show` で統合受信トレイのそのメールを開く。設定に「通知」タブを足した。
+> - テスト: `NewInboxMailTests` 3 件・`NewMailNotifierTests` 7 件 (MailStore)、`MailServiceNotificationTests` 4 件・`InboxModelOpenFromNotificationTests` 2 件 (アプリ)。
+> - □ のまま: 「通知が実際に Mac に出る」「押すとそのメールが開く」は、本物の新着が要るので Claude は確かめていない (中身を決める部分と、開く部分はテスト済み)。
+> - 決めたこと (あとから変えられる): アプリが前にあっても通知を出す。起動直後の最初の一斉の同期では出さない。4 通以上は「n 件の新着メール」に (差出人を 3 人まで)。通知センターではアカウントごとにまとめる。
+> - 分かっている限界: メインウィンドウを閉じているときに通知を押すと、アプリは前に出るが、ウィンドウは開かない (T21 でメニューバー常駐と一緒に直す)。
 
 **依存:** T20a
 **触るファイル:** `Packages/MailStore/Sources/MailStore/NewMailNotifier.swift`、`App/Services/NotificationService.swift` (新規、`UserNotifications`)、`App/Features/Settings/`、テスト

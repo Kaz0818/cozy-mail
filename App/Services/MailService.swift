@@ -13,6 +13,24 @@ import Observation
 ///   受信は新しいメールの分だけで済む。一度開いたメールはオフラインでも読める。
 @MainActor @Observable
 final class MailService {
+    /// 新着の通知のつなぎ口 (T20b)。アプリでは Mac の通知センター、テストでは記録だけ。
+    struct NotificationHooks {
+        /// 起動時に一度だけ呼ぶ (通知の許可を求めるなど)。
+        var prepare: @MainActor () -> Void = {}
+        /// 設定で通知が入っているか。
+        var isEnabled: @MainActor () -> Bool = { false }
+        var post: @MainActor ([NewMailAlert]) -> Void = { _ in }
+
+        static let none = NotificationHooks()
+    }
+
+    /// 通知を押したときに、画面に「このメールを開いて」と頼むもの。`serial` は頼むたびに増える (同じメールを続けて開けるように)。
+    struct OpenRequest: Equatable {
+        var serial = 0
+        /// nil なら統合受信トレイを開くだけ (まとめた通知)。
+        var messageID: MessageID?
+    }
+
     private(set) var accounts: [Account] = []
     private(set) var isSyncing = false
     /// 最後の同期で失敗したアカウントの説明。成功したら nil。
@@ -32,21 +50,42 @@ final class MailService {
     private var resyncRequested: Set<AccountID> = []
     /// スリープから戻ったときの知らせの受け取り口。
     private var wakeObserver: (any NSObjectProtocol)?
+    private let notifications: NotificationHooks
+    /// 起動して最初の一斉の同期が済んだか。それまでの新着 (閉じていた間にたまった分) は通知しない。
+    private var hasFinishedFirstSync = false
+    private(set) var openRequest = OpenRequest()
 
-    init(directory: AccountDirectory, store: any MessageStore, watchesForNewMail: Bool = false) {
+    init(
+        directory: AccountDirectory, store: any MessageStore, watchesForNewMail: Bool = false,
+        notifications: NotificationHooks = .none
+    ) {
         self.directory = directory
         self.store = store
         self.watchesForNewMail = watchesForNewMail
+        self.notifications = notifications
         engine = SyncEngine(store: store)
     }
 
     /// アプリで使う組み合わせ: アカウント一覧は UserDefaults、パスワードはキーチェーン。新着を見張る。
     static func live() -> MailService {
-        MailService(
+        let notifier = NotificationService.shared
+        let service = MailService(
             directory: AccountDirectory(storage: UserDefaultsAccountListStorage(), secrets: KeychainSecretStore()),
             store: makeLiveStore(),
-            watchesForNewMail: true
+            watchesForNewMail: true,
+            notifications: NotificationHooks(
+                prepare: { notifier.start() },
+                isEnabled: { NotificationService.isEnabled() },
+                post: { notifier.post($0) }
+            )
         )
+        notifier.onOpen = { [weak service] id in service?.requestOpen(id) }
+        return service
+    }
+
+    /// 通知が押された。画面にそのメールを開いてもらう。
+    func requestOpen(_ id: MessageID?) {
+        openRequest = OpenRequest(serial: openRequest.serial + 1, messageID: id)
     }
 
     /// Mac の中の保存先。開けなかったとき (ファイルが壊れた、ディスクがいっぱいなど) は、前のようにメモリ上で動かす。
@@ -91,6 +130,7 @@ final class MailService {
 
     /// 起動時: アカウントを読み込んで同期し、新着の見張りを始める。
     func start() async {
+        notifications.prepare()
         await reloadAccounts()
         await syncAll()
         observeWake()
@@ -116,6 +156,7 @@ final class MailService {
         }
         accountFailures = failures
         isSyncing = false
+        hasFinishedFirstSync = true
         // 一斉の同期の間に、見張りから頼まれていた分
         for id in Array(resyncRequested) where !syncingAccounts.contains(id) {
             await sync(accountID: id)
@@ -158,12 +199,20 @@ final class MailService {
         }
         var failure: String?
         do {
-            _ = try await engine.sync(account: account, session: session)
+            let report = try await engine.sync(account: account, session: session)
+            notifyNewMail(report.newInboxMessages)
         } catch {
             failure = "\(account.displayName): \(Self.describe(error))"
         }
         await session.close()
         return failure
+    }
+
+    /// 新しく受信トレイに来た未読メールを通知する (T20b)。起動直後の最初の同期と、設定で切っているときは出さない。
+    private func notifyNewMail(_ messages: [MessageSummary]) {
+        guard hasFinishedFirstSync, !messages.isEmpty, notifications.isEnabled() else { return }
+        let alerts = NewMailNotifier.alerts(for: messages, accounts: accounts)
+        if !alerts.isEmpty { notifications.post(alerts) }
     }
 
     // MARK: - 新着の見張り (T20a)
