@@ -32,16 +32,45 @@ import Testing
         return model
     }
 
-    @Test func searchingShowsMatchesFromEveryFolderAndSelectsTheFirst() async throws {
+    @Test func searchingShowsMatchesFromEveryFolder() async throws {
         let model = try await loadedModel()
 
         await model.search("請求書")
 
         #expect(model.isSearching)
         #expect(model.messages.map(\.id.rawValue) == ["sent", "inbox"])
-        #expect(model.selectedMessageID == MessageID("sent"))
         #expect(model.title == "検索")
         #expect(model.subtitle == "「請求書」・2件")
+    }
+
+    /// 打っている途中で一番上のメールを勝手に開くと、読んでいない未読メールがサーバーで既読になってしまう。
+    /// 検索中は、開いていたメールが結果にないとき、何も開かない。
+    @Test func searchingDoesNotOpenOrMarkReadTheTopResult() async throws {
+        let store = InMemoryMessageStore()
+        await store.upsert([
+            message("unread", .inbox, subject: "請求書のお知らせ", minutesAgo: 1, isRead: false),
+            message("other", .inbox, subject: "会議", minutesAgo: 2),
+        ])
+        let accounts = [work]
+        let model = InboxModel(repository: LiveMailRepository(store: store, accounts: { accounts }))
+        await model.load()
+        await model.selectMessage(MessageID("other"))
+
+        await model.search("請求")
+
+        #expect(model.messages.map(\.id.rawValue) == ["unread"])
+        #expect(model.selectedMessageID == nil)
+        #expect(await store.message(id: MessageID("unread"))?.summary.isRead == false)
+    }
+
+    /// 開いていたメールが結果に入っていれば、そのまま開いておく。
+    @Test func theOpenMailStaysOpenWhenItIsInTheResults() async throws {
+        let model = try await loadedModel()
+        await model.selectMessage(MessageID("inbox"))
+
+        await model.search("請求書")
+
+        #expect(model.selectedMessageID == MessageID("inbox"))
     }
 
     @Test func theUnreadFilterAlsoNarrowsTheResults() async throws {

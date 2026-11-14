@@ -276,6 +276,12 @@ final class InboxModel {
             messages = found
             let keepSelection = selectedMessageID.map { id in messages.contains { $0.id == id } } ?? false
             if !keepSelection {
+                // 検索で打っている途中に一番上のメールを開くと、読んでいない未読メールまで既読になってしまう。
+                // 検索の結果が変わっただけのときは、何も開かない (削除などで消えたときは、次のメールを開く)
+                if isSearching && fallbackIndex == nil {
+                    await selectMessage(nil)
+                    return
+                }
                 let index = min(fallbackIndex ?? 0, messages.count - 1)
                 await selectMessage(messages.indices.contains(index) ? messages[index].id : nil)
             }
