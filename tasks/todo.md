@@ -450,8 +450,50 @@
 **触るファイル:** `Packages/MailStore/Sources/MailStore/MessageStore.swift` (`MessageQuery` の `searchText`)、`Sources/MailStoreSwiftData/SwiftDataMessageStore.swift`、`LiveMailRepository.swift`、`App/Features/Inbox/InboxModel.swift`、`App/Features/Reader/ReaderView.swift`、テスト (`MessageQueryTests`、`RepositorySearchTests`、`InboxModelSearchTests`、UI テスト)
 **大きさ:** S
 
+### T30: Dock のアイコンの未読数
+
+**説明:** 統合受信トレイの未読数 (サイドバーの「統合受信トレイ」と同じ数) を Dock のアイコンのバッジに出す。0 のとき、見本のメールを出しているとき、数が分からないときは何も出さない。数を決める部分 (`DockBadge`) は画面と分けて `MailStore` に置き、Linux でもテストできるようにする。
+オーナーの決定 (2026-11-14、チェックポイント v0.1): Dock の未読数は v0.1 に入れる。T20 からは外した (T20 は IMAP IDLE と通知だけ)。
+
+**受け入れ条件:**
+- [x] 未読数が 1 以上なら、その数が Dock のアイコンに出る。0 のときは何も出ない
+- [x] 見本のメールを出しているときは出ない
+- [x] 数はサイドバーの「統合受信トレイ」と同じ (メールを読むと減り、受信すると増える)
+- [x] 1000 以上は「999+」(バッジが長くなりすぎないように)
+
+**確認:**
+- [x] 🐧 `DockBadgeTests` (0・見本・負の数・999+) と、`InboxModel` の `dockBadgeLabel` のテスト
+- [ ] 🍎 Dock に未読数が出て、読むと減る。全部読むと消える
+
+> 状態 (2026-11-14): 🐧 済み。`DockBadge.label(unreadCount:isShowingSamples:)` (MailStore、Linux でもテスト可) で文字を決め、`InboxModel.dockBadgeLabel` が `unifiedUnreadCount` を渡す。`MainWindow` が `onChange` で `NSApplication.dockTile.badgeLabel` に付ける。
+> - 決めたこと (あとから変えられる): 1000 以上は「999+」。ウィンドウをすべて閉じても、最後の数が残る (T20 のバックグラウンド同期のときに見直す)。
+> - 🍎 は「オーナーの確認待ち」へ (docs/handoff.md)。
+
+**依存:** T15
+**触るファイル:** `Packages/MailStore/Sources/MailStore/DockBadge.swift`、`Tests/MailStoreTests/DockBadgeTests.swift`、`App/Features/Inbox/InboxModel.swift`、`App/Features/Inbox/MainWindow.swift`、`AppTests/InboxModelTests.swift`
+**大きさ:** S
+
+### T31: 添付ファイルを Finder へドラッグ
+
+**説明:** 本文の添付ファイルの欄 (`App/Features/Reader/`) から Finder へドラッグすると、そのファイルが保存される。サンドボックスのアプリなので、SwiftUI の `Transferable` (`FileRepresentation`) で、ドラッグを落としたときに中身を取って一時ファイルを渡す形にする。今ある保存ボタンと Quick Look はそのまま。
+オーナーの決定 (2026-11-14、チェックポイント v0.1): 添付のドラッグは v0.1 に入れる。
+
+**受け入れ条件:**
+- [ ] 添付のカードを Finder (やデスクトップ) にドラッグすると、元のファイル名で保存される
+- [ ] 保存されたファイルの中身が、メールの添付と同じ
+- [ ] 保存ボタンと、ダブルクリックの Quick Look は今までどおり動く
+- [ ] 取れなかったときは、エラーの表示が出る (黙って空のファイルを作らない)
+
+**確認:**
+- [ ] 🐧 一時ファイルの書き出し (ファイル名、中身、危ない名前、取得の失敗) のテスト
+- [ ] 🍎 添付を Finder にドラッグすると保存され、中身が正しい
+
+**依存:** T14
+**触るファイル:** `App/Features/Reader/AttachmentDrag.swift` (新規)、`App/Features/Reader/ReaderView.swift`、`AppTests/AttachmentDragTests.swift`
+**大きさ:** S
+
 ### ✅ チェックポイント v0.1
-- [ ] 🍎 SPEC の P0 のユーザーストーリー (US-1〜US-11) の受け入れ条件を、実際の 4 アカウントで確認する — 作ったものは 2026-11-14 にオーナーが確認。残り: まだ作っていない P0 (Dock の未読数 US-9、添付のドラッグ US-5、本文全体の検索 US-10) をどうするかの判断と、Yahoo!
+- [ ] 🍎 SPEC の P0 のユーザーストーリー (US-1〜US-11) の受け入れ条件を、実際の 4 アカウントで確認する — 作ったものは 2026-11-14 にオーナーが確認。残り: Dock の未読数 (T30) と添付のドラッグ (T31) は v0.1 に入れると決めた (2026-11-14)。本文全体の検索 (US-10) はあとで Mac で行う。Yahoo!
 - [x] 🍎 `docs/manual-test.md` の手順をすべて通す (2026-11-14 オーナーが Mac で確認。Yahoo! の手順は除く)
 - [x] 🐧 すべてのパッケージのテストが通る (CI で通過)
 - [ ] **オーナーと確認して、フェーズ 4 を細かく決め直す**
@@ -462,7 +504,7 @@
 
 | ID | タスク | US | 依存 |
 |---|---|---|---|
-| T20 | IMAP IDLE で新着をすぐ受け取り、Mac の通知と Dock の未読数を出す。スリープから戻ったら 1 分以内に再開する | US-12 | T15 |
+| T20 | IMAP IDLE で新着をすぐ受け取り、Mac の通知を出す (Dock の未読数は T30 に移した)。スリープから戻ったら 1 分以内に再開する | US-12 | T15 |
 | T21 | メニューバー常駐 (`MenuBarExtra`) と、ログイン時の起動 (`SMAppService`) | US-12 | T20 |
 | T22 | オフラインの待ち行列。オフライン中の操作を、つながったらサーバーに送る | US-13 | T15 |
 | T23 | 下書きの自動保存と、サーバーの下書きフォルダへの保存 | US-14 | T18 |

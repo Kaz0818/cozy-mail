@@ -137,3 +137,24 @@ import Testing
         #expect(AccountError.alreadyAdded.userMessage.contains("すでに"))
     }
 }
+
+/// Dock のアイコンの未読数 (T30)。サイドバーの「統合受信トレイ」と同じ数になる。
+@MainActor @Suite struct InboxModelDockBadgeTests {
+    @Test func sampleMailShowsNoBadge() async {
+        let model = InboxModel(repository: PreviewMailRepository(), isShowingSamples: true)
+        await model.load()
+        #expect(model.unifiedUnreadCount == 22)
+        #expect(model.dockBadgeLabel == nil)
+    }
+
+    @Test func realMailShowsTheUnifiedInboxUnreadCount() async {
+        let model = InboxModel(repository: PreviewMailRepository(), isShowingSamples: false)
+        await model.load()
+        #expect(model.dockBadgeLabel == "22")
+    }
+
+    @Test func beforeTheFirstLoadThereIsNoBadge() {
+        let model = InboxModel(repository: PreviewMailRepository(), isShowingSamples: false)
+        #expect(model.dockBadgeLabel == nil)
+    }
+}

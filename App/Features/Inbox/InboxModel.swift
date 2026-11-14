@@ -45,6 +45,12 @@ final class InboxModel {
     /// アカウントがまだ 1 つもなく、見本のメールを出しているとき。
     private(set) var isShowingSamples = false
 
+    /// Dock のアイコンに出す未読数の文字 (T30)。0・見本のメールのときは nil。
+    /// サイドバーの「統合受信トレイ」と同じ数 (`unifiedUnreadCount`) を使う。
+    var dockBadgeLabel: String? {
+        DockBadge.label(unreadCount: unifiedUnreadCount, isShowingSamples: isShowingSamples)
+    }
+
     private var repository: any MailRepository
 
     init(repository: any MailRepository, isShowingSamples: Bool = false) {
