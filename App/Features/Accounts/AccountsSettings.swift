@@ -28,6 +28,7 @@ struct AccountsSettings: View {
                             Button("削除…", role: .destructive) { pendingRemoval = account }
                         }
                         SenderNameField(account: account)
+                        SignatureField(account: account)
                     }
                 }
             } footer: {
@@ -38,7 +39,7 @@ struct AccountsSettings: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 420)
+        .frame(width: 520, height: 520)
         .sheet(isPresented: $isAdding) { AddAccountSheet() }
         .confirmationDialog(
             "\(pendingRemoval?.displayName ?? "") を削除しますか?",
@@ -90,6 +91,56 @@ private struct SenderNameField: View {
                 message = error.userMessage
             } catch {
                 message = "保存できませんでした: \(error)"
+            }
+        }
+    }
+}
+
+/// 署名 (T25)。新規作成・返信・転送のとき、このアカウントから送るメールに入る。欄から離れたときに保存する。
+private struct SignatureField: View {
+    let account: Account
+    @Environment(MailService.self) private var service
+    @State private var text = ""
+    @State private var saved = ""
+    @State private var message: String?
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("署名")
+                .font(.callout)
+                .foregroundStyle(Palette.textSecondary)
+            TextEditor(text: $text)
+                .font(.body)
+                .frame(minHeight: 54, maxHeight: 90)
+                .focused($isFocused)
+                .onChange(of: isFocused) { _, focused in
+                    if !focused { save() }
+                }
+                .accessibilityLabel(Text("\(account.displayName) の署名"))
+            if let message {
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(Palette.textSecondary)
+            }
+        }
+        .task {
+            saved = await service.signatures.signature(for: account.id)
+            text = saved
+        }
+        .onDisappear(perform: save)
+    }
+
+    private func save() {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed != saved else { return }
+        Task {
+            do {
+                try await service.setSignature(trimmed, for: account.id)
+                saved = trimmed
+                message = trimmed.isEmpty ? "署名は入りません。" : "署名を保存しました。"
+            } catch {
+                message = "保存できませんでした: \(error.localizedDescription)"
             }
         }
     }

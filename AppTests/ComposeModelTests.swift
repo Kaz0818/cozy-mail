@@ -1,3 +1,4 @@
+import AccountKit
 import Foundation
 import MailStore
 import Testing
@@ -123,5 +124,67 @@ private final class SendSpyRepository: MailRepository, @unchecked Sendable {
         let first = try #require(model.attachments.first)
         model.removeAttachment(first.id)
         #expect(model.attachments.map(\.filename) == ["b.txt"])
+    }
+}
+
+/// 署名 (T25)。差出人のアカウントの署名が入り、差出人を変えると入れ替わる。
+@MainActor @Suite struct ComposeModelSignatureTests {
+    private func signatures(_ pairs: [(AccountID, String)]) async throws -> SignatureStore {
+        let store = SignatureStore(storage: InMemoryAccountListStorage())
+        for (id, text) in pairs { try await store.setSignature(text, for: id) }
+        return store
+    }
+
+    @Test func aNewMessageGetsTheSenderSignature() async throws {
+        let repository = PreviewMailRepository()
+        let accounts = try await repository.accounts()
+        let model = ComposeModel(repository: repository, signatures: try await signatures([(accounts[0].id, "山田 (仕事)")]))
+        await model.load(.new())
+        #expect(model.body == "\n\n-- \n山田 (仕事)")
+    }
+
+    @Test func switchingTheSenderSwapsTheSignature() async throws {
+        let repository = PreviewMailRepository()
+        let accounts = try await repository.accounts()
+        let model = ComposeModel(repository: repository, signatures: try await signatures([
+            (accounts[0].id, "山田 (仕事)"), (accounts[1].id, "やまだ"),
+        ]))
+        await model.load(.new())
+        model.body = "こんにちは" + model.body
+        model.accountID = accounts[1].id
+        #expect(model.body == "こんにちは\n\n-- \nやまだ")
+        model.accountID = accounts[2].id
+        #expect(model.body == "こんにちは")
+    }
+
+    @Test func aReplyPutsTheSignatureAboveTheQuote() async throws {
+        let repository = PreviewMailRepository()
+        let first = try #require(try await repository.messages(in: .unified(.inbox), filter: .all).first)
+        let model = ComposeModel(repository: repository, signatures: try await signatures([(first.accountID, "山田")]))
+        await model.load(.replying(.reply, to: first.id))
+        #expect(model.body.hasPrefix("\n\n-- \n山田\n\n"))
+        #expect(model.body.contains("\n> "))
+    }
+
+    @Test func withoutSignaturesNothingChanges() async throws {
+        let model = ComposeModel(repository: PreviewMailRepository())
+        await model.load(.new())
+        #expect(model.body.isEmpty)
+    }
+}
+
+/// 設定の署名の欄 (T25)。アカウントを消したら、その署名も消える。
+@MainActor @Suite struct MailServiceSignatureTests {
+    @Test func removingAnAccountForgetsItsSignature() async throws {
+        let directory = AccountDirectory(
+            storage: InMemoryAccountListStorage(), secrets: InMemorySecretStore(),
+            connector: { _, _ in throw CancellationError() }, senderConnector: { _, _ in throw CancellationError() }
+        )
+        let signatures = SignatureStore(storage: InMemoryAccountListStorage())
+        let service = MailService(directory: directory, store: InMemoryMessageStore(), signatures: signatures)
+        try await service.setSignature("山田", for: AccountID("a"))
+        #expect(await signatures.signature(for: AccountID("a")) == "山田")
+        await service.removeAccount(AccountID("a"))
+        #expect(await signatures.signature(for: AccountID("a")) == "")
     }
 }

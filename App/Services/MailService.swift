@@ -39,6 +39,8 @@ final class MailService {
     private(set) var revision = 0
 
     let directory: AccountDirectory
+    /// アカウントごとの署名 (T25)。
+    let signatures: SignatureStore
     private let store: any MessageStore
     private let engine: SyncEngine
     /// 受信トレイを見張って新着をすぐ取るか (T20a)。アプリだけ。テストと見本では本物のサーバーにつながないよう見張らない。
@@ -61,9 +63,11 @@ final class MailService {
 
     init(
         directory: AccountDirectory, store: any MessageStore, watchesForNewMail: Bool = false,
-        notifications: NotificationHooks = .none
+        notifications: NotificationHooks = .none,
+        signatures: SignatureStore = SignatureStore(storage: InMemoryAccountListStorage())
     ) {
         self.directory = directory
+        self.signatures = signatures
         self.store = store
         self.watchesForNewMail = watchesForNewMail
         self.notifications = notifications
@@ -81,7 +85,8 @@ final class MailService {
                 prepare: { notifier.start() },
                 isEnabled: { NotificationService.isEnabled() },
                 post: { notifier.post($0) }
-            )
+            ),
+            signatures: .live()
         )
         notifier.onOpen = { [weak service] id in service?.requestOpen(id) }
         return service
@@ -283,13 +288,19 @@ final class MailService {
         await reloadAccounts()
     }
 
-    /// アカウントを削除する。パスワードと、保存していたメールも消える。
+    /// 署名を保存する (T25)。空なら消す。
+    func setSignature(_ signature: String, for id: AccountID) async throws {
+        try await signatures.setSignature(signature, for: id)
+    }
+
+    /// アカウントを削除する。パスワードと、保存していたメールと、署名も消える。
     func removeAccount(_ id: AccountID) async {
         do {
             try await directory.remove(id, messages: store)
         } catch {
             syncError = Self.describe(error)
         }
+        try? await signatures.remove(id)
         await reloadAccounts()
         restartWatching()
     }
