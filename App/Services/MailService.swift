@@ -41,6 +41,8 @@ final class MailService {
     let directory: AccountDirectory
     /// アカウントごとの署名 (T25)。
     let signatures: SignatureStore
+    /// Mac に保存した下書き (T23a)。
+    let drafts: DraftStore
     private let store: any MessageStore
     private let engine: SyncEngine
     /// 受信トレイを見張って新着をすぐ取るか (T20a)。アプリだけ。テストと見本では本物のサーバーにつながないよう見張らない。
@@ -101,10 +103,14 @@ final class MailService {
         directory: AccountDirectory, store: any MessageStore, watchesForNewMail: Bool = false,
         notifications: NotificationHooks = .none,
         signatures: SignatureStore = SignatureStore(storage: InMemoryAccountListStorage()),
-        undoSendDelay: @escaping @MainActor () -> Duration = { .zero }
+        undoSendDelay: @escaping @MainActor () -> Duration = { .zero },
+        drafts: DraftStore = DraftStore(
+            directory: FileManager.default.temporaryDirectory.appendingPathComponent("CozyMailDrafts-\(UUID().uuidString)")
+        )
     ) {
         self.directory = directory
         self.signatures = signatures
+        self.drafts = drafts
         self.store = store
         self.watchesForNewMail = watchesForNewMail
         self.notifications = notifications
@@ -125,7 +131,8 @@ final class MailService {
                 post: { notifier.post($0) }
             ),
             signatures: .live(),
-            undoSendDelay: { UndoSendSetting.delay(in: .standard) }
+            undoSendDelay: { UndoSendSetting.delay(in: .standard) },
+            drafts: makeLiveDrafts()
         )
         notifier.onOpen = { [weak service] id in service?.requestOpen(id) }
         return service
@@ -155,6 +162,18 @@ final class MailService {
         }
     }
 
+    /// 下書きの保存先: アプリの保存フォルダの Drafts (メールの保存先の隣)。
+    private static func makeLiveDrafts() -> DraftStore {
+        let base = (try? SwiftDataMessageStore.defaultDirectory().deletingLastPathComponent())
+            ?? FileManager.default.temporaryDirectory.appendingPathComponent("CozyMail")
+        return DraftStore(directory: base.appendingPathComponent("Drafts", isDirectory: true))
+    }
+
+    /// 下書きを保存した・消した。下書きフォルダを読み直してもらう (T23a)。
+    func draftsChanged() {
+        revision += 1
+    }
+
     /// SwiftUI プレビュー用: 何も保存しない。
     static func preview() -> MailService {
         MailService(
@@ -167,7 +186,8 @@ final class MailService {
     var repository: any MailRepository {
         guard !accounts.isEmpty else { return PreviewMailRepository() }
         let directory = directory
-        return LiveMailRepository(
+        // 下書きフォルダには、Mac に保存した下書きも出す (T23a)
+        let live = LiveMailRepository(
             store: store,
             // アカウントは、このアプリが読み込み済みの最新の一覧を使う。`directory` に聞きに行くと、受信がキーチェーンの確認
             // (「キーチェーンを使おうとしています」) で止まっている間、その後ろで待たされて一覧が出なくなるため。
@@ -178,6 +198,7 @@ final class MailService {
             // 送信も、そのたびに送信用のサーバーにつなぎ、送ったら閉じる
             openSender: { accountID in try await directory.openSender(for: accountID) }
         )
+        return DraftsMergingRepository(base: live, drafts: drafts)
     }
 
     var isShowingSamples: Bool {

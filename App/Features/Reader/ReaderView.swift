@@ -25,6 +25,12 @@ struct ReaderView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .accessibilityIdentifier("reader.multiSelection")
             } else if let message = model.selectedMessage {
+                // Mac に保存した下書きは、作成ウィンドウで続きを書ける (T23a)
+                if let draftID = LocalDraft.id(from: message.id) {
+                    ContinueDraftBar(draftID: draftID)
+                        .padding(.horizontal, 32)
+                        .padding(.top, 8)
+                }
                 MessageContent(model: model, message: message)
                     // メールを変えたら「画像を表示」などの状態を初めに戻す
                     .id(message.id)
@@ -355,7 +361,8 @@ private struct ReaderToolbar: View {
     var body: some View {
         let message = model.selectedMessage
         // 返信・転送は 1 通のときだけ。ほかの操作は、選んでいるすべてに効く (T26)
-        let single = model.isMultiSelecting ? nil : message
+        // Mac に保存した下書き (T23a) には返信・転送しない
+        let single = model.isMultiSelecting || message.map({ LocalDraft.id(from: $0.id) != nil }) == true ? nil : message
         let star = model.starToggleAction
         HStack(spacing: 10) {
             HStack(spacing: 0) {
@@ -463,5 +470,27 @@ private struct ToolbarIcon: View {
         .disabled(!isEnabled)
         .help(Text(title))
         .accessibilityLabel(Text(title))
+    }
+}
+
+/// 下書きを作成ウィンドウで開き直すための帯 (T23a)。
+private struct ContinueDraftBar: View {
+    let draftID: UUID
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Label("Mac に保存した下書きです", systemImage: "doc")
+                .foregroundStyle(Palette.textSecondary)
+            Spacer()
+            Button("作成ウィンドウで続きを書く") {
+                openWindow(id: CozyMailApp.composeWindowID, value: ComposeRequest.editingDraft(draftID))
+            }
+            .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("reader.continueDraft")
+        }
+        .font(.callout)
+        .padding(12)
+        .glassCard()
     }
 }
