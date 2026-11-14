@@ -39,26 +39,44 @@ public struct MailboxSyncState: Sendable, Hashable, Codable {
     }
 }
 
-/// 一覧と未読数のための絞り込み。保存先が自分の中で (SwiftData ならデータベースで) 絞り込めるよう、条件だけを渡す。
+/// 一覧・未読数・検索のための絞り込み。保存先が自分の中で (SwiftData ならデータベースで) 絞り込めるよう、条件だけを渡す。
 /// 何年分のメールがあっても、画面を更新するたびに全部を読み込まずに済む。
 public struct MessageQuery: Sendable, Hashable {
     /// このアカウントのメールだけ (登録中のもの。削除したアカウントのメールは出さない)。
     public var accounts: Set<AccountID>
-    public var selection: MailboxSelection
+    /// フォルダやラベル。nil なら、迷惑メールとゴミ箱を除くすべてのフォルダ (検索で使う。Gmail と同じ)。
+    public var selection: MailboxSelection?
     public var filter: MessageFilter
+    /// 検索の言葉 (T19)。空なら探さない。空白で区切った言葉は、すべてを含むものだけ。
+    public var searchText: String
 
-    public init(accounts: Set<AccountID>, selection: MailboxSelection, filter: MessageFilter = .all) {
+    public init(accounts: Set<AccountID>, selection: MailboxSelection?, filter: MessageFilter = .all, searchText: String = "") {
         self.accounts = accounts
         self.selection = selection
         self.filter = filter
+        self.searchText = searchText
+    }
+
+    /// 検索の言葉を、空白で区切ったもの。
+    public var searchWords: [String] {
+        searchText.split(whereSeparator: \.isWhitespace).map(String.init)
     }
 
     /// 画面の決まり (`MailboxSelection.contains`・`MessageFilter.matches`) どおりかどうか。保存先の実装はこれと同じ結果を返す。
     public func matches(_ message: StoredMessage) -> Bool {
         let summary = message.summary
-        return accounts.contains(summary.accountID)
-            && selection.contains(summary, labels: message.labels)
-            && filter.matches(summary)
+        let inPlace = selection.map { $0.contains(summary, labels: message.labels) }
+            ?? (summary.mailbox != .junk && summary.mailbox != .trash)
+        return accounts.contains(summary.accountID) && inPlace && filter.matches(summary) && matchesSearch(summary)
+    }
+
+    /// 検索の言葉がすべて、差出人の名前・アドレス・件名・本文の書き出しのどれかに含まれるか。
+    /// 大文字・小文字とアクセント記号は区別しない (SwiftData の `localizedStandardContains` と同じ)。
+    public func matchesSearch(_ summary: MessageSummary) -> Bool {
+        let fields = [summary.sender.name, summary.sender.address, summary.subject, summary.preview]
+        return searchWords.allSatisfy { word in
+            fields.contains { $0.range(of: word, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        }
     }
 }
 

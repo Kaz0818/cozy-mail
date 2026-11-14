@@ -8,11 +8,10 @@ import UniformTypeIdentifiers
 /// 返信・転送のボタンは作成ウィンドウを開く (T18)。
 struct ReaderView: View {
     let model: InboxModel
-    @State private var searchText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ReaderToolbar(model: model, searchText: $searchText)
+            ReaderToolbar(model: model)
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 8)
@@ -317,7 +316,8 @@ private struct AttachmentCard: View {
 /// ボタンは T15 / T18 で動くようにする。いまは見た目だけ。
 private struct ReaderToolbar: View {
     let model: InboxModel
-    @Binding var searchText: String
+    /// 打っている途中の言葉は、ここに持つ (日本語の変換中に、画面の外の値で上書きされないように)
+    @State private var searchText = ""
     @FocusState private var isSearchFocused: Bool
     @Environment(\.openWindow) private var openWindow
 
@@ -383,12 +383,30 @@ private struct ReaderToolbar: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(Palette.textSecondary)
+                // 打つたびに、Mac に保存したメールから探す (T19)
                 TextField("メールを検索", text: $searchText)
                     .textFieldStyle(.plain)
                     .foregroundStyle(Palette.textPrimary)
                     .focused($isSearchFocused)
+                    .accessibilityIdentifier("search.field")
                     // ⌘F (メニューの「メールを検索」) でここにカーソルを置く
                     .onChange(of: model.searchFocusRequest) { isSearchFocused = true }
+                    // esc で検索をやめる
+                    .onExitCommand { searchText = "" }
+                    .onChange(of: searchText) { Task { await model.search(searchText) } }
+                    // フォルダを選んで検索が終わったら、欄も空にする
+                    .onChange(of: model.searchText) { if model.searchText != searchText { searchText = model.searchText } }
+                if model.isSearching {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Palette.textSecondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(Text("検索をやめる"))
+                    .accessibilityLabel(Text("検索をやめる"))
+                }
             }
             .padding(.horizontal, 14)
             .frame(width: 260, height: 38)

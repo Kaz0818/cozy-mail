@@ -54,6 +54,10 @@ public struct LiveMailRepository: MailRepository {
         try await store.summaries(matching: MessageQuery(accounts: registeredAccountIDs(), selection: selection, filter: filter))
     }
 
+    public func search(_ text: String, filter: MessageFilter) async throws -> [MessageSummary] {
+        try await store.summaries(matching: MessageQuery(accounts: registeredAccountIDs(), selection: nil, filter: filter, searchText: text))
+    }
+
     /// 受信トレイ (と、それを絞り込んだ「未読」) は、サーバーから聞いた数があればそれを使う。
     /// まだ聞けていないアカウントと、ほかのフォルダは、保存しているメールを数える。
     public func unreadCount(in selection: MailboxSelection) async throws -> Int {

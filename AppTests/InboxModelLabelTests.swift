@@ -27,15 +27,15 @@ import Testing
     }
 
     private func loadedModel(store: InMemoryMessageStore = InMemoryMessageStore()) async throws -> InboxModel {
-        try await store.upsert([
+        await store.upsert([
             message(1, work, labels: ["\\Inbox", "仕事"], role: .inbox, isRead: false),
             message(2, work, labels: ["仕事"]),
             message(3, work, labels: ["趣味"]),
             message(4, work, labels: ["仕事"], role: .trash, isRead: false),
             message(5, home, labels: ["仕事"], isRead: false),
         ])
-        try await store.setLabels(["仕事", "趣味"], account: work.id)
-        try await store.setLabels(["仕事"], account: home.id)
+        await store.setLabels(["仕事", "趣味"], account: work.id)
+        await store.setLabels(["仕事"], account: home.id)
         let accounts = [work, home]
         let model = InboxModel(repository: LiveMailRepository(store: store, accounts: { accounts }))
         await model.load()
@@ -76,7 +76,7 @@ import Testing
         let model = try await loadedModel(store: store)
         await model.select(.label(work.id, "趣味"))
 
-        try await store.setLabels(["仕事"], account: work.id)
+        await store.setLabels(["仕事"], account: work.id)
         await model.load()
 
         #expect(model.selection == .account(work.id, .inbox))
