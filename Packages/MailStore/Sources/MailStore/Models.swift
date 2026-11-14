@@ -82,18 +82,28 @@ public enum MailboxSelection: Hashable, Sendable {
     case unified(MailboxRole)
     /// 1 つのアカウントのフォルダ。
     case account(AccountID, MailboxRole)
+    /// 1 つのアカウントの Gmail のラベル (自分で作ったもの。名前は「仕事/経理」のように階層を / でつないだまま)。
+    case label(AccountID, String)
 
-    public var role: MailboxRole {
+    /// フォルダの役割。ラベルのときは nil。
+    public var role: MailboxRole? {
         switch self {
         case let .unified(role), let .account(_, role): role
+        case .label: nil
         }
     }
 
     public var accountID: AccountID? {
         switch self {
         case .unified: nil
-        case let .account(id, _): id
+        case let .account(id, _), let .label(id, _): id
         }
+    }
+
+    /// ラベルを選んでいるときの、ラベルの名前。
+    public var label: String? {
+        if case let .label(_, name) = self { return name }
+        return nil
     }
 }
 

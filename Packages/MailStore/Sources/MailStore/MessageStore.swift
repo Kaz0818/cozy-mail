@@ -54,8 +54,11 @@ public struct MessageQuery: Sendable, Hashable {
     }
 
     /// 画面の決まり (`MailboxSelection.contains`・`MessageFilter.matches`) どおりかどうか。保存先の実装はこれと同じ結果を返す。
-    public func matches(_ message: MessageSummary) -> Bool {
-        accounts.contains(message.accountID) && selection.contains(message) && filter.matches(message)
+    public func matches(_ message: StoredMessage) -> Bool {
+        let summary = message.summary
+        return accounts.contains(summary.accountID)
+            && selection.contains(summary, labels: message.labels)
+            && filter.matches(summary)
     }
 }
 
@@ -87,6 +90,9 @@ public protocol MessageStore: Sendable {
     /// 役割 (ゴミ箱など) ごとのサーバー上のフォルダ名。同期のたびに覚え直す。
     func mailboxName(for role: MailboxRole, account: AccountID) async throws -> String?
     func setMailboxNames(_ names: [MailboxRole: String], account: AccountID) async throws
+    /// Gmail の自分で作ったラベルの一覧 (サイドバーに出す)。同期のたびに覚え直す。まだなければ空。
+    func labels(account: AccountID) async throws -> [String]
+    func setLabels(_ labels: [String], account: AccountID) async throws
 }
 
 /// テストと SwiftUI プレビュー用。アプリを終了すると消える。
@@ -101,6 +107,7 @@ public actor InMemoryMessageStore: MessageStore {
     private var inboxUnread: [AccountID: Int] = [:]
     private var raw: [MessageID: Data] = [:]
     private var mailboxNames: [AccountID: [MailboxRole: String]] = [:]
+    private var labelLists: [AccountID: [String]] = [:]
 
     public init() {}
 
@@ -134,6 +141,7 @@ public actor InMemoryMessageStore: MessageStore {
         states = states.filter { key, _ in key.account != account }
         inboxUnread[account] = nil
         mailboxNames[account] = nil
+        labelLists[account] = nil
     }
 
     public func mailboxName(for role: MailboxRole, account: AccountID) -> String? {
@@ -142,6 +150,14 @@ public actor InMemoryMessageStore: MessageStore {
 
     public func setMailboxNames(_ names: [MailboxRole: String], account: AccountID) {
         mailboxNames[account] = names
+    }
+
+    public func labels(account: AccountID) -> [String] {
+        labelLists[account] ?? []
+    }
+
+    public func setLabels(_ labels: [String], account: AccountID) {
+        labelLists[account] = labels
     }
 
     public func inboxUnreadCount(account: AccountID) -> Int? {
@@ -157,11 +173,11 @@ public actor InMemoryMessageStore: MessageStore {
     }
 
     public func summaries(matching query: MessageQuery) -> [MessageSummary] {
-        stored.values.map(\.summary).filter(query.matches).sorted { $0.date > $1.date }
+        stored.values.filter(query.matches).map(\.summary).sorted { $0.date > $1.date }
     }
 
     public func unreadCount(matching query: MessageQuery) -> Int {
-        stored.values.count { query.matches($0.summary) && !$0.summary.isRead }
+        stored.values.count { query.matches($0) && !$0.summary.isRead }
     }
 
     public func message(id: MessageID) -> StoredMessage? {

@@ -75,7 +75,7 @@
 | 送信 | SMTP (全アカウント共通) | 同上 |
 | IMAP / SMTP 実装 | Apple の [`swift-nio-imap`](https://github.com/apple/swift-nio-imap) を土台に、薄いクライアントを自作。SMTP は SwiftNIO 上に自作 | Apple が保守していて Swift Concurrency と合う |
 | ログイン | **全アカウントでアプリパスワード** (Gmail も)。キーチェーンに保存する。Gmail の「Google でログイン」(OAuth 2.0 + XOAUTH2、仕組みは T9 で作成済み) は P2 | Google Cloud の「本番環境」にはホームページとプライバシーポリシーの URL が要り、「テスト」のままだと 7 日ごとに再ログインになるため (2026-11-13 決定)。アプリパスワードなら設定も費用も要らない |
-| Mac 内の保存 | SwiftData (`SwiftDataMessageStore`)。見出しは索引つきで保存し、何年分でも置ける。一覧と未読数は、データベースの中で絞り込んで数える (`MessageQuery`。画面の更新のたびに全部を読み込まない)。開いたメールの生データ (本文と添付) は見出しと別に保存し、大きいものは SwiftData がデータベースの外のファイルに置く。保存フォルダは本人だけが読める (0700)、iCloud には同期しない | オフラインで読む・検索するため。何年分もの古いメールを Mac に置くため |
+| Mac 内の保存 | SwiftData (`SwiftDataMessageStore`)。見出しは索引つきで保存し、何年分でも置ける。一覧と未読数は、データベースの中で絞り込んで数える (`MessageQuery`。画面の更新のたびに全部を読み込まない)。Gmail のラベルでの絞り込みもデータベースの中で行う (第 2 版のモデル、2026-11-14 オーナー承認)。開いたメールの生データ (本文と添付) は見出しと別に保存し、大きいものは SwiftData がデータベースの外のファイルに置く。保存フォルダは本人だけが読める (0700)、iCloud には同期しない | オフラインで読む・検索するため。何年分もの古いメールを Mac に置くため |
 | 秘密情報 | macOS のキーチェーン | |
 | HTML 表示 | `WKWebView` (JavaScript 無効、外部読み込みを制御) | |
 | 常駐と通知 | `MenuBarExtra` (メニューバー)、`UserNotifications` (通知)、`SMAppService` (ログイン時に起動) | |
@@ -202,7 +202,7 @@ public actor IMAPSession {
 
 **先に相談する**
 - 新しい外部ライブラリを追加する。
-- SwiftData のモデルを変える (保存済みのメールを捨てないため、`MailSchemaV2` と移行の手順 `MailMigrationPlan` が要る)。
+- SwiftData のモデルを変える (保存済みのメールを捨てないため、次の版 (いまは第 2 版 `MailSchemaV2`。次は `MailSchemaV3`) と移行の手順 `MailMigrationPlan` が要る)。
 - 対応 OS のバージョンを変える、iPhone / iPad 版を足す。
 - Google Cloud の設定が必要な変更。
 - 有料の署名 (Apple Developer Program) が必要になる機能を足す。

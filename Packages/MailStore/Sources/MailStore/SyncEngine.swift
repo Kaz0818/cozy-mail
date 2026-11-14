@@ -91,6 +91,10 @@ public struct SyncEngine: Sendable {
             if let role = target.role, names[role] == nil { names[role] = target.name }
         }
         try await store.setMailboxNames(names, account: account.id)
+        // サイドバーに出す、自分で作ったラベル (Gmail だけ)
+        try await store.setLabels(
+            account.provider == .gmail ? Self.gmailLabels(in: mailboxes) : [], account: account.id
+        )
         var report = Report()
         for target in targets {
             let result = try await sync(target, account: account, session: session)
@@ -215,6 +219,24 @@ public struct SyncEngine: Sendable {
             add(bySpecialUse ?? byName, role)
         }
         return targets
+    }
+
+    /// Gmail の自分で作ったラベル (名前順)。Gmail ではラベルがフォルダとして見えるので、そこから選ぶ。
+    /// 受信トレイ、システムのフォルダ (`[Gmail]/...`。英国・ドイツなどでは `[Google Mail]/...`)、
+    /// 役割の決まったフォルダ、入れ物だけのフォルダは入れない。
+    /// 名前は修正 UTF-7 を解いたもので、メールの `X-GM-LABELS` の名前と同じになる。
+    public static func gmailLabels(in mailboxes: [IMAPMailbox]) -> [String] {
+        let systemPrefixes = ["[Gmail]", "[Google Mail]"]
+        return mailboxes
+            .filter { mailbox in
+                mailbox.isSelectable
+                    && mailbox.specialUse == nil
+                    && mailbox.rawName.uppercased() != "INBOX"
+                    && !systemPrefixes.contains { mailbox.name == $0 || mailbox.name.hasPrefix($0 + "/") }
+            }
+            .map(\.name)
+            // 大文字・小文字は区別せずに並べる (Linux でも同じ順になるよう、言語ごとの並べ方は使わない)
+            .sorted { ($0.lowercased(), $0) < ($1.lowercased(), $1) }
     }
 
     // MARK: - 見出しから保存用の形へ

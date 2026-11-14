@@ -2,6 +2,7 @@
 #if canImport(SwiftData)
 import Foundation
 import MailCore
+import SwiftData
 import Testing
 @testable import MailStore
 @testable import MailStoreSwiftData
@@ -164,6 +165,50 @@ import Testing
     }
 
     /// 読めない保存ファイルは、黙って壊さず、開けないと知らせる (アプリはメモリ上の保存先に切り替える)。
+    /// ラベルの一覧と、ラベルでの絞り込みは、開き直しても使える (T13)。
+    @Test func labelsSurviveReopening() async throws {
+        let folder = Folder()
+        let first = try open(folder)
+        // `message` は Gmail のメールに「\Inbox」と「仕事」のラベルを付ける
+        try await first.upsert([message(1, account: gmail, mailbox: "[Gmail]/All Mail"), message(2, account: yahoo)])
+        try await first.setLabels(["仕事"], account: gmail)
+
+        let reopened = try open(folder)
+        #expect(try await reopened.labels(account: gmail) == ["仕事"])
+        let query = MessageQuery(accounts: [gmail, yahoo], selection: .label(gmail, "仕事"))
+        #expect(try await reopened.summaries(matching: query).map(\.id) == [MessageID("gmail/[Gmail]/All Mail/1")])
+    }
+
+    /// 第 1 版の形 (`MailSchemaV1`) で保存したメールも、今の版で開くと消えずに残り、ラベルで絞り込める。
+    @Test func mailSavedInTheFirstVersionIsKeptAndCanBeFoundByLabel() async throws {
+        let folder = Folder()
+        try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)
+        do {
+            // 第 1 版のアプリが保存したのと同じファイルを作る
+            let schema = Schema(versionedSchema: MailSchemaV1.self)
+            let container = try ModelContainer(for: schema, configurations: ModelConfiguration(
+                schema: schema, url: folder.url.appendingPathComponent(SwiftDataMessageStore.fileName), cloudKitDatabase: .none
+            ))
+            let context = ModelContext(container)
+            context.insert(MailSchemaV1.MailRecord(
+                key: "gmail/1", accountID: gmail.rawValue, mailbox: "[Gmail]/All Mail", uid: 1, role: MailboxRole.archive.rawValue,
+                senderName: "田中 健一", senderAddress: "k.tanaka@example.com", recipients: Data("[]".utf8),
+                subject: "第 1 版で保存したメール", preview: "", date: now, isRead: false, isStarred: false, isFlagged: false,
+                hasAttachments: false, gmailMessageID: 1, gmailThreadID: 1, labels: ["仕事"]
+            ))
+            let account = MailSchemaV1.AccountRecord(accountID: gmail.rawValue)
+            account.inboxUnread = 3
+            context.insert(account)
+            try context.save()
+        }
+
+        let store = try open(folder)
+        let query = MessageQuery(accounts: [gmail], selection: .label(gmail, "仕事"))
+        #expect(try await store.summaries(matching: query).map(\.subject) == ["第 1 版で保存したメール"])
+        #expect(try await store.inboxUnreadCount(account: gmail) == 3)
+        #expect(try await store.labels(account: gmail).isEmpty)
+    }
+
     @Test func anUnreadableStoreThrowsInsteadOfCrashing() throws {
         let folder = Folder()
         try FileManager.default.createDirectory(at: folder.url, withIntermediateDirectories: true)

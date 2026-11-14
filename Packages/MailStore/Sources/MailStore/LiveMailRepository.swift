@@ -75,6 +75,11 @@ public struct LiveMailRepository: MailRepository {
         return total
     }
 
+    public func labels(for account: AccountID) async throws -> [String] {
+        guard try await registeredAccountIDs().contains(account) else { return [] }
+        return try await store.labels(account: account)
+    }
+
     /// 本文。初めて開いたときはサーバーから取って保存し、一覧の書き出しも埋める。2 回目からは保存分を使う。
     public func body(for id: MessageID) async throws -> MessageBody {
         let raw = try await rawMessage(for: id)

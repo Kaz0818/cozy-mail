@@ -284,19 +284,28 @@
 
 ### T13: フォルダとラベルで絞り込める
 
+> 状態 (2026-11-14): 🐧 アカウントを選ぶと、そのアカウントの Gmail のラベル (自分で作ったもの) がサイドバーの「ラベル」に出て、選ぶとそのラベルのメールが出る。🍎 実アカウントでの確認待ち。
+> - ラベルの一覧は、同期のたびに Gmail のフォルダの一覧 (LIST) から覚え直す。`INBOX`、`[Gmail]/...` (`[Google Mail]/...`)、役割の決まったフォルダ、入れ物だけのフォルダは入れない。Gmail で消したラベルは次の同期で消える。
+> - ラベルを開くと、そのラベルが付いたメールが出る。Gmail の Web 版と同じく、迷惑メールとゴミ箱のメールは出さない。「仕事」と「仕事/経理」は別のラベルとして扱い、入れ子は「仕事/経理」のように 1 行で並べる。ラベルごとに未読数を出す。
+> - 開いていたラベルが Gmail で消されたら、そのアカウントの受信トレイに戻る。
+> - **SwiftData のモデルを第 2 版にした** (2026-11-14 オーナー承認、案 A)。メールごとのラベルをデータベースで探せる形 (`labelKey`) と、アカウントごとのラベルの一覧 (`labelNames`) を足した。第 1 版で保存したメールは捨てずに移す (`MailMigrationPlan`、`mailSavedInTheFirstVersionIsKeptAndCanBeFoundByLabel`)。オーナーの Mac の保存ファイルも移った (212 通のまま。移す前の写しを `Mail-backup-v1-2026-11-14` に残した)。
+> - Gmail 以外のアカウントの、自分で作ったフォルダは、まだ扱わない (同期していない。Yahoo! などのアカウントがなく確かめられないため)。
+
 **説明:** IMAP の `SPECIAL-USE` で、受信トレイ・送信済み・下書き・アーカイブ・迷惑メール・ゴミ箱を見分け、サイドバーのフォルダに対応させる。Gmail のラベルは、アカウントの下にフォルダとして出す。スター付き・未読は全アカウントをまとめた仮想フォルダにする。
 
 **受け入れ条件:**
 - [x] サイドバーの各フォルダを選ぶと、全アカウント分のそのフォルダのメールが出る (US-4) (`filtersAndOtherFolders`)
-- [ ] アカウントを選ぶと、そのアカウントのフォルダとラベルだけが出る — **未実装**: いまはどのアカウントでも同じフォルダの並び。Gmail の自分で作ったラベルはまだ出ない
+- [x] アカウントを選ぶと、そのアカウントのフォルダとラベルだけが出る (`labelsAppearOnlyWhileAnAccountIsSelected`、`selectingALabelShowsThatAccountsMailWithTheLabel`) — Gmail のラベルのみ。Gmail 以外の自分で作ったフォルダはまだ
 - [x] Gmail の「すべてのメール」がアーカイブとして扱われる (`gmailRolesComeFromLabelsSoNothingIsDuplicated`)
 
 **確認:**
 - [x] 🐧 `SPECIAL-USE` の判定と、Gmail のラベルの扱いのテスト (`specialUseWinsOverNames`、`foldersWithoutSpecialUseAreRecognisedByName`、`gmailLabelChangesMoveMessagesBetweenFolders`)
+- [x] 🐧 ラベルの一覧と絞り込み (`gmailRemembersTheLabelsYouMade`、`gmailLabelListFollowsTheServer`、`MessageQueryTests`、`AccountLabelsTests`、`labelsSurviveReopening`)。Mac で MailStore 120 件、アプリ 62 件 + UI 6 件すべて通過 (2026-11-14)
 - [ ] 🍎 各フォルダの件数が Web 版と一致する
+- [ ] 🍎 Gmail のアカウントを選ぶと、自分で作ったラベルが出て、選ぶと Web 版のそのラベルと同じメールが出る (最近 30 日より前のメールは保存していないので、その分は出ない)
 
 **依存:** T12
-**触るファイル:** `Packages/MailStore/Sources/MailStore/MailboxRole.swift`、`SyncEngine.swift`、`App/Features/Inbox/SidebarView.swift`、`Tests/MailStoreTests/MailboxRoleTests.swift`
+**触るファイル:** `Packages/MailStore/Sources/MailStore/Models.swift`、`MailRepository.swift`、`MessageStore.swift`、`LiveMailRepository.swift`、`SyncEngine.swift`、`Sources/MailStoreSwiftData/SwiftDataMessageStore.swift`、`App/Features/Inbox/InboxModel.swift`、`App/Features/Inbox/SidebarView.swift`、`Tests/MailStoreTests/SyncEngineTests.swift`、`MessageQueryTests.swift`、`AccountLabelsTests.swift`、`SwiftDataMessageStoreTests.swift`、`AppTests/InboxModelLabelTests.swift`
 **大きさ:** M
 
 ### ✅ チェックポイント: 受信

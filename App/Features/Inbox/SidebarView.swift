@@ -12,6 +12,9 @@ struct SidebarView: View {
                 appHeader
                 accountsSection
                 foldersSection
+                if !model.labels.isEmpty {
+                    labelsSection
+                }
             }
             .padding(.horizontal, 12)
             .padding(.top, 20)
@@ -80,6 +83,26 @@ struct SidebarView: View {
         }
     }
 
+    /// アカウントを選んでいる間だけ出す、そのアカウントの Gmail のラベル (T13)。
+    private var labelsSection: some View {
+        VStack(alignment: .leading, spacing: Metrics.rowSpacing) {
+            SectionHeader(title: "ラベル")
+            if let accountID = model.selection.accountID {
+                ForEach(model.labels) { label in
+                    let selection = MailboxSelection.label(accountID, label.name)
+                    SidebarRow(
+                        title: label.name,
+                        icon: AnyView(Image(systemName: "tag")),
+                        badge: label.unreadCount,
+                        isSelected: model.selection == selection
+                    ) {
+                        Task { await model.select(selection) }
+                    }
+                }
+            }
+        }
+    }
+
     /// アカウントを選んでいる間は、そのアカウントのフォルダを開く。
     private func folderSelection(_ role: MailboxRole) -> MailboxSelection {
         if let accountID = model.selection.accountID { return .account(accountID, role) }
@@ -88,10 +111,24 @@ struct SidebarView: View {
 }
 
 private struct SectionHeader: View {
+    /// 見出しの右のボタン。
+    struct Action {
+        let systemImage: String
+        let label: LocalizedStringKey
+        let perform: () -> Void
+    }
+
     let title: LocalizedStringKey
-    let systemImage: String
-    let actionLabel: LocalizedStringKey
-    let action: () -> Void
+    var action: Action?
+
+    init(title: LocalizedStringKey) {
+        self.title = title
+    }
+
+    init(title: LocalizedStringKey, systemImage: String, actionLabel: LocalizedStringKey, action: @escaping () -> Void) {
+        self.title = title
+        self.action = Action(systemImage: systemImage, label: actionLabel, perform: action)
+    }
 
     var body: some View {
         HStack {
@@ -99,15 +136,20 @@ private struct SectionHeader: View {
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(Palette.textSecondary)
             Spacer()
-            Button(action: action) {
-                Image(systemName: systemImage)
-                    .font(.callout.weight(.semibold))
-                    .frame(width: 26, height: 26)
+            if let action {
+                Button(action: action.perform) {
+                    Image(systemName: action.systemImage)
+                        .font(.callout.weight(.semibold))
+                        .frame(width: 26, height: 26)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Palette.textPrimary)
+                .glassCapsule()
+                .accessibilityLabel(Text(action.label))
+            } else {
+                // ボタンのある見出しと高さをそろえる
+                Color.clear.frame(width: 26, height: 26)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(Palette.textPrimary)
-            .glassCapsule()
-            .accessibilityLabel(Text(actionLabel))
         }
         .padding(.horizontal, 8)
         .padding(.bottom, 2)

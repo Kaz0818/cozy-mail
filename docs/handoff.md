@@ -43,13 +43,13 @@ Cozy Mail は、2 つの場所で作業する。
 | T14〜T18 | 本文と添付、既読・スター・アーカイブ・削除・迷惑メール、キーボードとメニュー、SMTP 送信、作成・返信・転送 |
 | そのほか | 右クリックメニュー、キーチェーンの確認を 1 回に (`docs/signing.md`)、差出人の名前、名前のないメールはアドレスを出す、「送信済み」は宛先を出す |
 
-テスト件数 (2026-11-14): MailCore 82、MailStore 113 (うち SwiftData 17 件は Mac だけ。Linux では 96)、アプリ 59 + UI テスト 6。
+テスト件数 (2026-11-14): MailCore 82、MailStore 120 (うち SwiftData 20 件は Mac だけ。Linux では 100)、アプリ 62 + UI テスト 6。
 
 ### 途中・残っているもの
 | タスク | 状態 | どこでやるか |
 |---|---|---|
 | **T10 の残り: Mac への保存 (SwiftData)** | SwiftData での保存は済 (PR #9、マージ済み)。メールがたまると重くなる問題の修正は、ブランチ `t10-store-queries` の下書き PR。残り: 🍎 閉じて開き直す確認 | **ローカル** (SwiftData のテストは Mac だけ) |
-| T13: アカウントごとのフォルダ・Gmail のラベル | 統合のフォルダは済み | T10 のあと。保存先に手を入れるのでローカルがおすすめ |
+| T13: アカウントごとのフォルダ・Gmail のラベル | Gmail のラベルは作った (ブランチ `t13-gmail-labels` の下書き PR。SwiftData のモデルを第 2 版にした)。残り: 🍎 実アカウントでの確認 | ローカル |
 | T19: Mac 内の検索 | 未着手 | T10 のあと。保存先 (SwiftData) で探すのでローカル |
 | T9: Google でログイン (OAuth) | ⏸ 保留 (P2)。仕組みとテストは済み | — |
 | Yahoo! の確認 (T7、T11、T12 の一部) | Yahoo! のアドレスがないので未確認 | オーナー次第 |
@@ -71,6 +71,9 @@ Cozy Mail は、2 つの場所で作業する。
 ---
 
 ## 3. 作業の記録 (新しいものを上に)
+
+- **2026-11-14 ローカル**: T13 の Gmail のラベルを作った (ブランチ `t13-gmail-labels`)。オーナーの承認を得て SwiftData のモデルを第 2 版にした (`MailSchemaV2`。第 1 版からの移行つき)。
+  オーナーの Mac の保存ファイルは移る前に `~/Library/Containers/com.yourname.cozymail/Data/Library/Application Support/CozyMail/Mail-backup-v1-2026-11-14` に写した。
 
 - **2026-11-14 ローカル**: T10 の保存を SwiftData で作った (`MailStoreSwiftData` の `SwiftDataMessageStore`、テスト 16 件)。PR #9 (マージ済み)。
   あわせて、起動直後にキーチェーンの確認で一覧が空になる問題と、アプリの単体テストが本物のアカウントで受信していた問題を直した。
