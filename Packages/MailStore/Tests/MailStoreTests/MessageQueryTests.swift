@@ -127,7 +127,7 @@ import Testing
                 .sorted { $0.date > $1.date }
         }
 
-        let searches = ["田中", "tanaka", "TANAKA", "example.com", "会議", "資料", "田中 会議", "会議 資料 山田", "ない言葉", "  佐藤  "]
+        let searches = ["田中", "tanaka", "TANAKA", "example.com", "会議", "資料", "ご確認", "ください", "田中 会議", "会議 資料 山田", "ない言葉", "  佐藤  "]
         let selections: [MailboxSelection?] = [nil, .unified(.inbox), .account(Self.first, .sent), .label(Self.first, "仕事")]
         for text in searches {
             for selection in selections {
