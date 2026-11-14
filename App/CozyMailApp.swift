@@ -7,8 +7,9 @@ struct CozyMailApp: App {
     static let composeWindowID = "compose"
 
     @AppStorage(AppTheme.storageKey) private var themeRawValue = AppTheme.system.rawValue
-    /// 自動テストでは、本物のアカウント・キーチェーン・保存ファイルに触れないよう、メモリ上だけで動かす。
-    @State private var service = isAutomatedTest(ProcessInfo.processInfo) ? MailService.preview() : MailService.live()
+    /// アプリを終える前に、送るのを待っているメールを送る (T24)。`MailService` はここが持つ。
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+    private var service: MailService { appDelegate.service }
     /// メニューバーの中身と Dock の未読数 (T21、T30)。
     @State private var menuBar = MenuBarModel()
 
@@ -78,5 +79,24 @@ struct CozyMailApp: App {
             }
             .environment(service)
         }
+    }
+}
+
+/// アプリ全体の出来事を受け取る。
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    /// 自動テストでは、本物のアカウント・キーチェーン・保存ファイルに触れないよう、メモリ上だけで動かす。
+    let service = CozyMailApp.isAutomatedTest(ProcessInfo.processInfo) ? MailService.preview() : MailService.live()
+
+    /// 送信の取り消しを待っているメールがあれば、待たずに送り終えてから終わる (T24)。
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard service.hasPendingSends else { return .terminateNow }
+        let service = service
+        Task {
+            // 送れなかったら終えない (書いたものを失わないよう、メインウィンドウで知らせて開き直せるようにする)
+            let allSent = await service.flushSends()
+            sender.reply(toApplicationShouldTerminate: allSent)
+        }
+        return .terminateLater
     }
 }

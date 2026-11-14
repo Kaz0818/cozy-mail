@@ -61,16 +61,54 @@ final class MailService {
     /// 開いているメインウィンドウの数 (T21)。0 なら、通知から開くときにウィンドウを開く。
     private(set) var mainWindowCount = 0
 
+    /// 送るのを待っている (まだ取り消せる) メール (T24)。
+    struct PendingSend: Identifiable, Equatable {
+        let id: UUID
+        let subject: String
+    }
+
+    /// あとで送ったメールについての知らせ (T24)。送れなかった (開き直せる) か、送れたが「送信済み」に残せなかった。
+    struct SendNotice: Identifiable, Equatable {
+        let id: UUID
+        let subject: String
+        let message: String
+        /// 送れなかったので、作成ウィンドウで開き直せる。false は「送れたが残せなかった」。
+        let canReopen: Bool
+    }
+
+    /// 送るのを待っている (「送信を取り消す」を出す) メール。送り始めたら外す。
+    private(set) var pendingSends: [PendingSend] = []
+    /// 送っている途中のメール (もう取り消せない)。
+    private var sendingIDs: Set<UUID> = []
+    /// 預けたメールの件名 (知らせに出す)。
+    private var subjects: [UUID: String] = [:]
+    private(set) var sendNotices: [SendNotice] = []
+    /// 取り消した・送れなかったメールの下書き。作成ウィンドウで開き直すときに `takeRestoredDraft` で受け取る。
+    private var restoredDrafts: [UUID: Draft] = [:]
+    /// 送信を取り消せる秒数 (設定)。0 ならすぐ送る。
+    private let undoSendDelay: @MainActor () -> Duration
+    @ObservationIgnored private lazy var sendQueue = SendQueue(
+        send: { [weak self] draft in
+            guard let self else { throw CancellationError() }
+            let repository = await self.repository
+            return try await repository.send(draft)
+        },
+        onEvent: { [weak self] event in await self?.handleSendEvent(event) },
+        describe: { ComposeModel.describe($0) }
+    )
+
     init(
         directory: AccountDirectory, store: any MessageStore, watchesForNewMail: Bool = false,
         notifications: NotificationHooks = .none,
-        signatures: SignatureStore = SignatureStore(storage: InMemoryAccountListStorage())
+        signatures: SignatureStore = SignatureStore(storage: InMemoryAccountListStorage()),
+        undoSendDelay: @escaping @MainActor () -> Duration = { .zero }
     ) {
         self.directory = directory
         self.signatures = signatures
         self.store = store
         self.watchesForNewMail = watchesForNewMail
         self.notifications = notifications
+        self.undoSendDelay = undoSendDelay
         engine = SyncEngine(store: store)
     }
 
@@ -86,7 +124,8 @@ final class MailService {
                 isEnabled: { NotificationService.isEnabled() },
                 post: { notifier.post($0) }
             ),
-            signatures: .live()
+            signatures: .live(),
+            undoSendDelay: { UndoSendSetting.delay(in: .standard) }
         )
         notifier.onOpen = { [weak service] id in service?.requestOpen(id) }
         return service
@@ -303,6 +342,84 @@ final class MailService {
         try? await signatures.remove(id)
         await reloadAccounts()
         restartWatching()
+    }
+
+    // MARK: - 送信の取り消し (T24)
+
+    /// 取り消せるよう、設定の秒数だけ預けてから送る。預けたら true。
+    /// 0 秒の設定と見本のメールのときは預けずに false を返す (作成ウィンドウがその場で送り、失敗もそこで知らせる)。
+    func sendLater(_ draft: Draft) async -> Bool {
+        let delay = undoSendDelay()
+        guard delay > .zero, !isShowingSamples else { return false }
+        let id = await sendQueue.enqueue(draft, delay: delay)
+        pendingSends.append(PendingSend(id: id, subject: draft.subject))
+        subjects[id] = draft.subject
+        return true
+    }
+
+    /// 送る前なら取り消す。取り消せたら true で、下書きは `takeRestoredDraft(id)` で受け取れる。
+    func cancelSend(_ id: UUID) async -> Bool {
+        guard let draft = await sendQueue.cancel(id) else { return false }
+        pendingSends.removeAll { $0.id == id }
+        subjects[id] = nil
+        restoredDrafts[id] = draft
+        return true
+    }
+
+    /// 取り消した・送れなかったメールの下書きを受け取る。2 回目からは nil。
+    func takeRestoredDraft(_ id: UUID) -> Draft? {
+        restoredDrafts.removeValue(forKey: id)
+    }
+
+    func dismissSendNotice(_ id: UUID) {
+        sendNotices.removeAll { $0.id == id }
+    }
+
+    /// 送るのを待っている・送っている途中のメールがあるか (アプリを終える前に確かめる)。
+    var hasPendingSends: Bool {
+        !pendingSends.isEmpty || !sendingIDs.isEmpty
+    }
+
+    /// 待たずにすぐ送る (アプリを終えるとき)。送り途中のものも終わるまで待つ。
+    /// 送れなかったものがあれば false (終えずに、開き直せるよう知らせる)。
+    func flushSends() async -> Bool {
+        let before = Set(sendNotices.filter(\.canReopen).map(\.id))
+        await sendQueue.flush()
+        return sendNotices.allSatisfy { !$0.canReopen || before.contains($0.id) }
+    }
+
+    private func handleSendEvent(_ event: SendQueue.Event) {
+        switch event {
+        case let .started(id):
+            pendingSends.removeAll { $0.id == id }
+            sendingIDs.insert(id)
+        case let .sent(id, outcome):
+            pendingSends.removeAll { $0.id == id }
+            sendingIDs.remove(id)
+            defer { subjects[id] = nil }
+            if case let .sentButNotSaved(reason) = outcome {
+                let subject = subjects[id] ?? ""
+                showNotice(SendNotice(
+                    id: id, subject: subject,
+                    message: "相手には届いていますが、このアカウントの「送信済み」フォルダに残せませんでした。\n\(reason)",
+                    canReopen: false
+                ))
+            }
+            // 送信済みのフォルダを読み直す
+            Task { await syncAll() }
+        case let .failed(id, draft, message):
+            pendingSends.removeAll { $0.id == id }
+            sendingIDs.remove(id)
+            subjects[id] = nil
+            restoredDrafts[id] = draft
+            showNotice(SendNotice(id: id, subject: draft.subject, message: message, canReopen: true))
+        }
+    }
+
+    /// 知らせを出す。メインウィンドウを閉じていたら、見えるよう開いてもらう。
+    private func showNotice(_ notice: SendNotice) {
+        sendNotices.append(notice)
+        if mainWindowCount == 0 { requestOpen(nil) }
     }
 
     private func reloadAccounts() async {
