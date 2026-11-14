@@ -111,6 +111,8 @@ PR は #16 まで (T31 は #17 で main に入る)。オーナーは 2026-11-14 
 
 ## 3. 作業の記録 (新しいものを上に)
 
+- **2026-11-14 ローカル**: オーナーのアイコン画像 (10 サイズ、16〜1024) をアプリのアイコンにした (ブランチ `app-icon`)。`App/Assets.xcassets/AppIcon.appiconset` と project.yml の `ASSETCATALOG_COMPILER_APPICON_NAME`。画像は大きさを変えずにそのまま使った。PR #29 (T28) をマージした。
+
 - **2026-11-14 ローカル**: T28 (サーバー設定を手で入れる) を作った (ブランチ `t28-manual-servers`)。`CustomServers` と `ProviderChoice.other`、アカウントの追加の「その他」の欄。PR #28 (T27) をマージした。
 
 - **2026-11-14 ローカル**: T27 (サーバー側の検索) を作った (ブランチ `t27-server-search`)。`IMAPSession.searchUIDs(in:text:)`、`ServerSearchRepository`、一覧の下の「サーバーで探す」。
