@@ -204,31 +204,38 @@
 
 ### T10: 保存と同期
 
-> 状態 (2026-11-13): 🐧 **同期処理とメモリ上の保存先は済** (テスト 12 件)。SwiftData の保存先 (`MailStoreSwiftData`) は次の段階。
+> 状態 (2026-11-14): ✅ **同期処理、メモリ上の保存先、SwiftData の保存先 (`SwiftDataMessageStore`) すべて済**。アプリの保存先は SwiftData に差し替えた (開けないときだけメモリ上に切り替わる)。Mac の `xcodebuild test -scheme MailStore-Package` で全 107 件が通過 (うち SwiftData のテスト 12 件)。アプリを起動して、サンドボックスの中に `Mail.store` (フォルダは 0700) ができることも確認した。
 > - Gmail は「すべてのメール」「迷惑メール」「ゴミ箱」だけを同期し、受信トレイなどの区別はラベルで決める (二重に出ない)。
 > - SPECIAL-USE のないサーバー (Yahoo! など) は、フォルダ名 (Sent / Draft / Bulk Mail / 送信済み など) から役割を推し量る。
 > - 受信トレイの未読数は、同期のたびにサーバーに直接聞く (`STATUS (UNSEEN)`)。保存外の古い未読も含めて、サーバーの数と一致する。
 > - 画面への窓口 `LiveMailRepository` も作成済み (テスト 8 件)。仮データの `PreviewMailRepository` と差し替えて使う (T11)。
 > - ~~**未解決:** 一覧の書き出し (preview) は空のまま~~ → T14 で、本文を初めて開いたときに埋めるようにした。
-> - **残り:** SwiftData での保存 (いまはメモリ上だけ。アプリを終了すると消え、起動のたびに最近 30 日分を取り直す)。
+> - **SwiftData での保存:** 見出し (`MailRecord`、索引つき)、本文の生データ (`RawMessageRecord`、大きいものはデータベースの外のファイル)、同期の進み具合、アカウントごとの未読数とフォルダ名を保存する。アプリを終了しても残り、次の起動は前回の一覧がすぐ出て、受信は新着だけで済む。モデルは `MailSchemaV1` で、形を変えるときは `MailSchemaV2` と移行の手順を足す。
+> - **何年分も置く:** 5 年分 (3 アカウント・6,000 通) を保存して開き直すテストが通る。ただし `MessageStore.allSummaries()` は全件を読むので、数万通を超えるなら一覧の取り出しを期間・件数で区切る形に変える (T10 の次の改善として残す)。
+> - **保存ファイルが壊れたとき:** 開けないとアプリはメモリ上の保存先に切り替わり、その起動では毎回 30 日分を取り直す。壊れたファイルの自動修復はまだない。
+> - Linux の CI では SwiftData のテストは空になるので、macOS の CI に `xcodebuild test` を足した。
 
-**説明:** `MailStore` に `MessageStore` プロトコル、メモリ上の実装、同期処理を作る。同期処理は、初回に 30 日分の見出しを取り、2 回目以降は新しい UID だけを取ってフラグをまとめて確認する。`UIDVALIDITY` が変わったら取り直す。Gmail の同じメールは `X-GM-MSGID` で 1 通にまとめる。SwiftData の実装 (`MailStoreSwiftData`) も作る。
+**説明:** `MailStore` に `MessageStore` プロトコル、メモリ上の実装、同期処理を作る。同期処理は、初回に 30 日分の見出しを取り、2 回目以降は新しい UID だけを取ってフラグをまとめて確認する。`UIDVALIDITY` が変わったら取り直す。Gmail の同じメールは `X-GM-MSGID` で 1 通にまとめる。SwiftData の実装 (`MailStoreSwiftData`) も作る。古いメールも何年分も Mac に置けるようにする。
 
 **受け入れ条件:**
 - [x] 偽の IMAP サーバー相手に、初回の同期・新着・削除・フラグ変更・`UIDVALIDITY` の変化を正しく扱える
 - [x] Gmail で「受信トレイ」と「スター付き」の両方にあるメールが、統合受信トレイに 1 通だけ出る
 - [x] 未読数がサーバー側の数と一致する (受信トレイ。`STATUS (UNSEEN)`)
+- [x] アプリを終了して開き直しても、メール・同期の進み具合・未読数・本文が残り、開き直したあとは新着だけを受信する (`SwiftDataMessageStoreTests`)
+- [x] 何年分 (5 年・6,000 通) 置いても、フォルダごとの取り出しと件数が合う (`yearsOfMailStayQueryable`)
 
 **確認:**
-- [x] 🐧 `swift test --package-path Packages/MailStore` (2026-11-13 時点で 87 件すべて通過)
+- [x] 🐧 `swift test --package-path Packages/MailStore` (2026-11-13 時点で 87 件すべて通過。SwiftData のテストは Linux では空)
+- [x] 🍎 `cd Packages/MailStore && xcodebuild test -scheme MailStore-Package -destination 'platform=macOS'` (2026-11-14 に 107 件すべて通過)
+- [x] 🍎 アプリを起動して、サンドボックスの中に保存ファイルができる (2026-11-14 Claude が確認)
 
 **依存:** T7, T8
-**触るファイル:** `Packages/MailStore/Sources/MailStore/MessageStore.swift`、`InMemoryMessageStore.swift`、`SyncEngine.swift`、`Sources/MailStoreSwiftData/SwiftDataMessageStore.swift`、`Tests/MailStoreTests/SyncEngineTests.swift`
-**大きさ:** L → 着手時に「同期処理」と「SwiftData の実装」の 2 つに分ける
+**触るファイル:** `Packages/MailStore/Sources/MailStore/MessageStore.swift` (メモリ上の実装 `InMemoryMessageStore` もここ)、`SyncEngine.swift`、`Sources/MailStoreSwiftData/SwiftDataMessageStore.swift`、`Package.swift`、`App/Services/MailService.swift`、`project.yml`、`Tests/MailStoreTests/SyncEngineTests.swift`、`Tests/MailStoreTests/SwiftDataMessageStoreTests.swift`
+**大きさ:** L → 「同期処理」と「SwiftData の実装」の 2 つに分けて進めた (どちらも済)
 
 ### T11: Yahoo! アカウントを追加すると、本物のメールが一覧に出る
 
-> 状態 (2026-11-13): ✅ アカウント管理 (`AccountDirectory`、テスト 11 件)、画面 (追加シート、設定のアカウント一覧、受信ボタン) ともに済。CI の macOS でビルドとテストが通過。**オーナーの Mac で、実際の Gmail アカウントを追加し、本物のメールが一覧に出ることを確認** (2026-11-13)。保存先はまだメモリ上 (起動のたびに 30 日分を取り直す)
+> 状態 (2026-11-13): ✅ アカウント管理 (`AccountDirectory`、テスト 11 件)、画面 (追加シート、設定のアカウント一覧、受信ボタン) ともに済。CI の macOS でビルドとテストが通過。**オーナーの Mac で、実際の Gmail アカウントを追加し、本物のメールが一覧に出ることを確認** (2026-11-13)。保存先は 2026-11-14 に SwiftData に替えた (T10)。この確認は保存先がメモリ上だったときのもの
 
 **説明:** アカウント追加の画面を作る (メールアドレス、アプリパスワード、表示名、色)。Yahoo!、iCloud、Outlook のサーバー設定は自動で入れる。追加したら接続を確かめ、同期を始め、T5 の一覧に本物のメールが出るようにする (仮の `MailRepository` を本物に差し替える)。
 
