@@ -88,6 +88,39 @@ public actor DraftStore {
         directory.appendingPathComponent("\(id.uuidString).json")
     }
 
+    // MARK: - サーバーの写しを消せなかったもの (T23b)
+
+    /// 下書きとは別のファイル (拡張子が json ではないので、下書きの一覧には出ない)。
+    private var removalsURL: URL {
+        directory.appendingPathComponent("server-removals.list")
+    }
+
+    /// まだ消せていないサーバーの写し。古い順。
+    public func pendingRemovals() -> [PendingServerRemoval] {
+        guard let data = try? Data(contentsOf: removalsURL) else { return [] }
+        return (try? JSONDecoder().decode([PendingServerRemoval].self, from: data)) ?? []
+    }
+
+    /// 消せなかった写しを覚える (同じものは 1 つだけ)。
+    public func addPendingRemoval(_ id: UUID, accountID: AccountID) throws {
+        var list = pendingRemovals()
+        guard !list.contains(where: { $0.id == id && $0.accountID == accountID }) else { return }
+        list.append(PendingServerRemoval(id: id, accountID: accountID))
+        try updatePendingRemovals(list)
+    }
+
+    /// 覚えている一覧をまるごと書き換える (消せたものを外す、試した回数を増やす)。
+    public func updatePendingRemovals(_ list: [PendingServerRemoval]) throws {
+        if list.isEmpty {
+            if FileManager.default.fileExists(atPath: removalsURL.path) {
+                try FileManager.default.removeItem(at: removalsURL)
+            }
+            return
+        }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try JSONEncoder().encode(list).write(to: removalsURL, options: .atomic)
+    }
+
     private func read(_ url: URL) -> SavedDraft? {
         guard let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(FileFormat.self, from: data) else { return nil }
@@ -153,6 +186,20 @@ public actor DraftStore {
     }
 }
 
+/// サーバーの下書きフォルダから、まだ消せていない写し (T23b)。あとで消し直す。
+public struct PendingServerRemoval: Codable, Equatable, Sendable {
+    public var id: UUID
+    public var accountID: AccountID
+    /// 消し直した回数。
+    public var attempts: Int
+
+    public init(id: UUID, accountID: AccountID, attempts: Int = 0) {
+        self.id = id
+        self.accountID = accountID
+        self.attempts = attempts
+    }
+}
+
 /// Mac に保存した下書きを、一覧の 1 通として表すための番号。
 public enum LocalDraft {
     private static let prefix = "local-draft/"
@@ -172,10 +219,16 @@ public enum LocalDraft {
 public struct DraftsMergingRepository: MailRepository {
     private let base: any MailRepository
     private let drafts: DraftStore
+    /// Mac の下書きを一覧から消したあとに呼ぶ (サーバーの写しも消すため、T23b)。
+    private let onDelete: @Sendable (SavedDraft) async -> Void
 
-    public init(base: any MailRepository, drafts: DraftStore) {
+    public init(
+        base: any MailRepository, drafts: DraftStore,
+        onDelete: @escaping @Sendable (SavedDraft) async -> Void = { _ in }
+    ) {
         self.base = base
         self.drafts = drafts
+        self.onDelete = onDelete
     }
 
     public func accounts() async throws -> [Account] {
@@ -192,7 +245,15 @@ public struct DraftsMergingRepository: MailRepository {
             if let wanted = selection.accountID, wanted != accountID { return nil }
             return Self.summary(saved, accountID: accountID)
         }
-        return (local + messages).sorted { $0.date > $1.date }
+        // サーバーに置いた写し (T23b) が同期で戻ってきたものは出さない (Mac の下書きを出す)。
+        // 同じアカウント・同じ件名で、日付が保存した時刻とほぼ同じもの (見出しの日付は秒までなので、少し幅を持たせる)
+        let remote = messages.filter { message in
+            !local.contains { draft in
+                draft.accountID == message.accountID && draft.subject == message.subject
+                    && abs(draft.date.timeIntervalSince(message.date)) < 2
+            }
+        }
+        return (local + remote).sorted { $0.date > $1.date }
     }
 
     public func unreadCount(in selection: MailboxSelection) async throws -> Int {
@@ -232,7 +293,9 @@ public struct DraftsMergingRepository: MailRepository {
     public func perform(_ action: MessageAction, on id: MessageID) async throws {
         guard let draftID = LocalDraft.id(from: id) else { return try await base.perform(action, on: id) }
         guard action == .moveToTrash else { throw MailRepositoryError.actionNotApplicable }
+        let saved = await drafts.draft(draftID)
         try await drafts.delete(draftID)
+        if let saved { await onDelete(saved) }
     }
 
     public func perform(_ action: MessageAction, on ids: [MessageID]) async throws {

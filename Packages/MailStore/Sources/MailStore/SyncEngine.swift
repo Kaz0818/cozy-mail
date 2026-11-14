@@ -27,6 +27,12 @@ public protocol MailServerSession: Sendable {
     func supportsIdle() async throws -> Bool
     /// フォルダの変化・時間切れ・作業の中止のどれかまで待つ (T20a)。
     func idle(in mailbox: String, timeout: Duration) async throws -> IMAPIdleEvent
+    /// 見出しに言葉を含むメールの UID (`UID SEARCH HEADER`、T23b)。
+    func searchUIDs(in mailbox: String, header field: String, containing value: String) async throws -> [UInt32]
+    /// UIDPLUS (指定したメールだけを消す仕組み) に対応しているか (T23b)。
+    func supportsUIDPlus() async throws -> Bool
+    /// 指定したメールだけを消す (`UID EXPUNGE`、T23b)。UIDPLUS がなければ何もせずに断る。
+    func deleteMessages(uids: [UInt32], in mailbox: String) async throws
 }
 
 extension MailServerSession {
@@ -35,6 +41,15 @@ extension MailServerSession {
 
     public func idle(in mailbox: String, timeout: Duration) async throws -> IMAPIdleEvent {
         throw IMAPError.commandFailed("IDLE is not supported")
+    }
+
+    /// 下書きの仕組みを使わない接続 (テストの偽物など) は、何も見つからず、何も消さない。
+    public func searchUIDs(in mailbox: String, header field: String, containing value: String) async throws -> [UInt32] { [] }
+
+    public func supportsUIDPlus() async throws -> Bool { false }
+
+    public func deleteMessages(uids: [UInt32], in mailbox: String) async throws {
+        throw IMAPError.unsupported("UIDPLUS")
     }
 }
 

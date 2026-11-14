@@ -699,10 +699,26 @@
 - [ ] 送ったら、サーバーの下書きも消える
 
 **確認:**
-- [ ] 🐧 偽のサーバーで、入れ直し・削除の順番のテスト
+- [x] 🐧 偽のサーバーで、入れ直し・削除の順番のテスト
 - [ ] 🍎 Gmail の Web 版の下書きに出る
 
+> 状態 (2026-11-14): 🐧 済み。オーナーの「作る。ミスしないでね」を受けて作った。**このアプリが入れた下書き以外は消さない** ことをいちばんにした。
+> - `ServerDrafts` (MailStore): 下書きごとに決まった Message-ID (`cozy-draft.<番号>@<ドメイン>`) を付けて `APPEND` する (`\Draft` `\Seen` の印付き)。
+>   消すときは、その印で `SEARCH HEADER` → 見出しを取って Message-ID が **ちょうど同じ** ものだけ → `UID STORE \Deleted` → `UID EXPUNGE` (指定したメールだけ)。
+>   UIDPLUS がないサーバーには、入れも消しもしない (ただの `EXPUNGE` はほかのメールまで消すため)。入れ直すときは、古いものを消してから入れる。
+> - アプリ (`MailService`): **サーバーに置くのは、作成ウィンドウを閉じたときだけ** (打つたびの自動保存は Mac だけ)。送った・捨てた・一覧で消したら、サーバーの写しも消す。
+>   消せなかった (つながらなかった) ものは `Drafts/server-removals.list` に覚え、同期のあとで消し直す (5 回であきらめる)。同じ下書きをまたそのアカウントで使っていれば、消さない。
+>   差出人を変えたら、前のアカウントの写しを消す。置いている途中に消すときは、置き終わるのを待つ。
+> - 同期で戻ってきたサーバーの写しは、下書きフォルダに二重に出さない (同じアカウント・同じ件名・保存した時刻から 2 秒以内のものを隠す。メールの保存データの形を変えないため)。
+> - テスト: `IMAPDraftCommandsTests` 6 件 (MailCore)、`ServerDraftsTests` 7 件・`DraftStoreTests` +1・`DraftsMergingRepositoryTests` +1 (MailStore)、`DraftAutosaveTests` +3・`ServerDraftCoordinationTests` 9 件 (アプリ)。
+>   わざと壊して、テストが気付くことも確かめた (Message-ID のちょうど同じかの確かめを外す、置き終わるのを待たずに消す)。
+> - □ のまま: 受け入れ条件と 🍎 は、本物のサーバーでは確かめていない (テストで本物のアカウントは使わない決まりのため)。
+> - **決めたこと (あとから変えられる):** サーバーに置くのは閉じたときだけ (Gmail の IMAP で置ける量は 1 日 500 MB で、打つたびに添付ごと置き直すと届くおそれがあるため)。
+> - 分かっている限り: アプリを開き直したあとに差出人を変えると、前のアカウントの写しが残る。書いている間 (閉じる前) は、下書きフォルダに古いサーバーの写しが並んで出ることがある。
+>   Gmail の Web 版で書き直した中身は、Mac には取り込まない (別の下書きとして出る)。Gmail は消した下書きをごみ箱に移すことがある。
+
 **依存:** T23a
+**触るファイル:** `Packages/MailCore/Sources/MailCore/IMAP/IMAPSession.swift`、`Packages/MailStore/Sources/MailStore/ServerDrafts.swift` (新規)、`DraftStore.swift`、`App/Services/MailService.swift`、`App/Features/Compose/`、テスト
 **大きさ:** M
 
 ### T27: サーバー側の検索

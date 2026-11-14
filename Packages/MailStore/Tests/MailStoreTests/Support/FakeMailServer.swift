@@ -16,6 +16,8 @@ actor FakeMailServer: MailServerSession {
         var contentType = "text/plain; charset=utf-8"
         /// 宛先 (To)。空なら書かない。
         var to = ""
+        /// Message-ID (`<>` なし)。nil なら `<UID@example.com>`。
+        var messageID: String?
     }
 
     struct Folder {
@@ -171,8 +173,62 @@ actor FakeMailServer: MailServerSession {
     func append(_ message: Data, to mailbox: String, flags: [String]) async throws {
         calls.append("APPEND \(mailbox) \(flags)")
         try checkWrite()
-        guard folders[mailbox] != nil else { throw FakeServerError.noSuchMailbox(mailbox) }
+        guard var folder = folders[mailbox] else { throw FakeServerError.noSuchMailbox(mailbox) }
         appended.append((mailbox, message))
+        // 本物と同じく、入れたメールをフォルダに置く (置くのは `keepsAppendedMessages` のときだけ。前からのテストを変えないため)
+        guard keepsAppendedMessages else { return }
+        let parsed = try? MIMEParser.parse(message)
+        folder.messages.append(Message(
+            uid: folder.uidNext, date: parsed?.date ?? Date(timeIntervalSince1970: 0), subject: parsed?.subject ?? "",
+            from: parsed?.from.first?.address ?? "", flags: flags, messageID: parsed?.messageID
+        ))
+        folder.uidNext += 1
+        folders[mailbox] = folder
+    }
+
+    /// true なら、`APPEND` したメールをフォルダに置く。
+    private(set) var keepsAppendedMessages = false
+
+    func setKeepsAppendedMessages(_ value: Bool) {
+        keepsAppendedMessages = value
+    }
+
+    // MARK: - サーバーの下書き (T23b)
+
+    /// false なら、UIDPLUS のないサーバーのふり (消す命令は断る)。
+    private(set) var hasUIDPlus = true
+
+    func setHasUIDPlus(_ value: Bool) {
+        hasUIDPlus = value
+    }
+
+    func supportsUIDPlus() async throws -> Bool {
+        hasUIDPlus
+    }
+
+    /// 本物の `SEARCH HEADER` と同じく、見出しに言葉を「含む」メールを返す (ちょうど同じでなくても当たる)。
+    /// ここでは Message-ID だけを見る。
+    func searchUIDs(in mailbox: String, header field: String, containing value: String) async throws -> [UInt32] {
+        calls.append("SEARCH \(mailbox) \(field) \(value)")
+        guard field.caseInsensitiveCompare("Message-ID") == .orderedSame else { return [] }
+        return try folder(mailbox).messages.filter { message in
+            (message.messageID ?? "\(message.uid)@example.com").contains(value)
+        }.map(\.uid).sorted()
+    }
+
+    func deleteMessages(uids: [UInt32], in mailbox: String) async throws {
+        guard !uids.isEmpty else { return }
+        calls.append("DELETE \(mailbox) \(uids.sorted())")
+        guard hasUIDPlus else { throw IMAPError.unsupported("UIDPLUS") }
+        try checkWrite()
+        guard var folder = folders[mailbox] else { throw FakeServerError.noSuchMailbox(mailbox) }
+        folder.messages.removeAll { uids.contains($0.uid) }
+        folders[mailbox] = folder
+    }
+
+    /// フォルダにあるメールの Message-ID (確かめる用)。
+    func messageIDs(in mailbox: String) -> [String] {
+        (folders[mailbox]?.messages ?? []).map { $0.messageID ?? "\($0.uid)@example.com" }
     }
 
     func close() async {
@@ -211,7 +267,7 @@ actor FakeMailServer: MailServerSession {
         formatter.dateFormat = "EEE, d MMM yyyy HH:mm:ss Z"
         let raw = "From: \(message.from)\r\n" + (message.to.isEmpty ? "" : "To: \(message.to)\r\n")
             + "Subject: \(message.subject)\r\nDate: \(formatter.string(from: message.date))\r\n"
-            + "Message-ID: <\(message.uid)@example.com>\r\nContent-Type: \(message.contentType)\r\n\r\n"
+            + "Message-ID: <\(message.messageID ?? "\(message.uid)@example.com")>\r\nContent-Type: \(message.contentType)\r\n\r\n"
         return IMAPFetchedHeader(
             uid: message.uid,
             flags: message.flags,

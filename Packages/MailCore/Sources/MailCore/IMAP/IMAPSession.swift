@@ -301,6 +301,37 @@ public actor IMAPSession {
         }
     }
 
+    // MARK: - サーバーの下書き (T23b)
+
+    /// 見出し (`field`) に `value` を含むメールの UID を、小さい順に返す (`UID SEARCH HEADER`)。
+    public func searchUIDs(in mailbox: String, header field: String, containing value: String) async throws(IMAPError) -> [UInt32] {
+        try await ensureExamined(mailbox)
+        let responses = try await run(.uidSearch(key: .header(field, ByteBuffer(string: value))))
+        var uids: [UInt32] = []
+        for response in responses {
+            if case let .untagged(.mailboxData(.search(ids, _))) = response {
+                uids.append(contentsOf: ids.map(\.rawValue))
+            }
+        }
+        return uids.sorted()
+    }
+
+    /// サーバーが UIDPLUS (指定したメールだけを消す `UID EXPUNGE`) に対応しているか。
+    public func supportsUIDPlus() async throws(IMAPError) -> Bool {
+        try await serverCapabilities().contains("UIDPLUS")
+    }
+
+    /// 指定したメールだけを消す: 「削除の印」を付けて、`UID EXPUNGE` でそのメールだけを消す。
+    /// UIDPLUS がないサーバーでは、印も付けずに `unsupported` を投げる
+    /// (ただの `EXPUNGE` は、フォルダ内のほかの「削除の印」のメールまで消してしまうため、決して使わない)。
+    public func deleteMessages(uids: [UInt32], in mailbox: String) async throws(IMAPError) {
+        guard let set = Self.uidSet(Array(Set(uids)).sorted()) else { return }
+        guard try await supportsUIDPlus() else { throw .unsupported("UIDPLUS") }
+        try await ensureSelected(mailbox)
+        _ = try await run(.uidStore(.set(set), [], .flags(.add(silent: true, list: [Flag("\\Deleted")]))))
+        _ = try await run(.uidExpunge(.set(set)))
+    }
+
     private func fetch(
         in mailbox: String, set: MessageIdentifierSetNonEmpty<UID>, attributes: [FetchAttribute]
     ) async throws(IMAPError) -> [IMAPFetchedHeader] {
