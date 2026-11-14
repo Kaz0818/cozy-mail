@@ -75,7 +75,7 @@
 | 送信 | SMTP (全アカウント共通) | 同上 |
 | IMAP / SMTP 実装 | Apple の [`swift-nio-imap`](https://github.com/apple/swift-nio-imap) を土台に、薄いクライアントを自作。SMTP は SwiftNIO 上に自作 | Apple が保守していて Swift Concurrency と合う |
 | ログイン | **全アカウントでアプリパスワード** (Gmail も)。キーチェーンに保存する。Gmail の「Google でログイン」(OAuth 2.0 + XOAUTH2、仕組みは T9 で作成済み) は P2 | Google Cloud の「本番環境」にはホームページとプライバシーポリシーの URL が要り、「テスト」のままだと 7 日ごとに再ログインになるため (2026-11-13 決定)。アプリパスワードなら設定も費用も要らない |
-| Mac 内の保存 | SwiftData。添付ファイルはファイルとして保存 | オフラインで読む・検索するため |
+| Mac 内の保存 | アプリ専用のフォルダに、アカウントごとのファイル (`FileMessageStore`)。開いたメールは生データ (本文と添付) を 1 通 1 ファイルで保存。本人だけが読める (0700) | オフラインで読む・検索するため。SwiftData は Linux でテストできないため使わない (2026-11-14 に変更) |
 | 秘密情報 | macOS のキーチェーン | |
 | HTML 表示 | `WKWebView` (JavaScript 無効、外部読み込みを制御) | |
 | 常駐と通知 | `MenuBarExtra` (メニューバー)、`UserNotifications` (通知)、`SMAppService` (ログイン時に起動) | |
@@ -132,8 +132,8 @@ cozy-mail/
 │   ├── MailCore/            → IMAP / SMTP / MIME。UI と OS に依存しない
 │   │   ├── Sources/MailCore/
 │   │   └── Tests/MailCoreTests/   → Fixtures/ に匿名化した実メールを置く
-│   ├── MailStore/           → 同期、オフラインの待ち行列、保存先の型 (`MessageStore` プロトコル) とメモリ上の実装
-│   │                          SwiftData の実装は Apple 専用のターゲット `MailStoreSwiftData` に分ける
+│   ├── MailStore/           → 同期、オフラインの待ち行列、保存先の型 (`MessageStore` プロトコル)
+│   │                          Mac に保存する実装 (`FileMessageStore`) と、メモリ上の実装 (テスト用)
 │   └── AccountKit/          → OAuth、事業者ごとのサーバー設定、秘密情報の型 (`SecretStore` プロトコル)
 │                              キーチェーンの実装は Apple 専用のターゲット `AccountKitKeychain` に分ける
 ├── AppTests/                → 画面の動きのテスト
@@ -202,7 +202,7 @@ public actor IMAPSession {
 
 **先に相談する**
 - 新しい外部ライブラリを追加する。
-- SwiftData のモデルを変える (保存済みデータの移行が必要になるため)。
+- 保存ファイルの形式を変える (`FileMessageStore.formatVersion` を上げると、保存済みのメールを捨てて取り直すことになるため)。
 - 対応 OS のバージョンを変える、iPhone / iPad 版を足す。
 - Google Cloud の設定が必要な変更。
 - 有料の署名 (Apple Developer Program) が必要になる機能を足す。

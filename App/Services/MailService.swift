@@ -7,8 +7,8 @@ import Observation
 /// アカウント・同期・保存先をまとめて持ち、画面にデータの出どころを渡す。
 ///
 /// - アカウントが 1 つもないときは見本のメール (`PreviewMailRepository`) を出す。
-/// - 保存先はいまはメモリ上 (`InMemoryMessageStore`)。アプリを終了すると消え、起動のたびに最近 30 日分を取り直す。
-///   SwiftData での保存は T10 の残りの作業。
+/// - 受信したメールは Mac の中に保存する (`FileMessageStore`)。次に起動したときは、すぐに前回の一覧を出し、
+///   受信は新しいメールの分だけで済む。一度開いたメールはオフラインでも読める。
 @MainActor @Observable
 final class MailService {
     private(set) var accounts: [Account] = []
@@ -32,8 +32,17 @@ final class MailService {
     static func live() -> MailService {
         MailService(
             directory: AccountDirectory(storage: UserDefaultsAccountListStorage(), secrets: KeychainSecretStore()),
-            store: InMemoryMessageStore()
+            store: makeLiveStore()
         )
+    }
+
+    /// Mac の中の保存先。作れなかったとき (ディスクがいっぱいなど) は、前のようにメモリ上で動かす。
+    private static func makeLiveStore() -> any MessageStore {
+        do {
+            return try FileMessageStore(directory: FileMessageStore.defaultDirectory())
+        } catch {
+            return InMemoryMessageStore()
+        }
     }
 
     /// SwiftUI プレビュー用: 何も保存しない。

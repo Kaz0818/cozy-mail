@@ -204,31 +204,36 @@
 
 ### T10: 保存と同期
 
-> 状態 (2026-11-13): 🐧 **同期処理とメモリ上の保存先は済** (テスト 12 件)。SwiftData の保存先 (`MailStoreSwiftData`) は次の段階。
+> 状態 (2026-11-14): 🐧 **済**。同期処理 (テスト 12 件) と、Mac に保存する保存先 `FileMessageStore` (テスト 10 件)。
 > - Gmail は「すべてのメール」「迷惑メール」「ゴミ箱」だけを同期し、受信トレイなどの区別はラベルで決める (二重に出ない)。
 > - SPECIAL-USE のないサーバー (Yahoo! など) は、フォルダ名 (Sent / Draft / Bulk Mail / 送信済み など) から役割を推し量る。
 > - 受信トレイの未読数は、同期のたびにサーバーに直接聞く (`STATUS (UNSEEN)`)。保存外の古い未読も含めて、サーバーの数と一致する。
 > - 画面への窓口 `LiveMailRepository` も作成済み (テスト 8 件)。仮データの `PreviewMailRepository` と差し替えて使う (T11)。
 > - ~~**未解決:** 一覧の書き出し (preview) は空のまま~~ → T14 で、本文を初めて開いたときに埋めるようにした。
-> - **残り:** SwiftData での保存 (いまはメモリ上だけ。アプリを終了すると消え、起動のたびに最近 30 日分を取り直す)。
+> - ~~**残り:** SwiftData での保存~~ → SwiftData は Linux でテストできないので、ファイルに保存する `FileMessageStore` にした (2026-11-14)。
+>   置き場所はアプリ専用のフォルダ (Application Support/CozyMail/Mail)。アカウントごとに `index.json` と、開いたメールの生データ `raw/<UUID>.eml`。
+>   起動するとすぐ前回の一覧が出て、受信は新しいメールの分だけ。壊れたファイルは捨てて取り直す。
 
-**説明:** `MailStore` に `MessageStore` プロトコル、メモリ上の実装、同期処理を作る。同期処理は、初回に 30 日分の見出しを取り、2 回目以降は新しい UID だけを取ってフラグをまとめて確認する。`UIDVALIDITY` が変わったら取り直す。Gmail の同じメールは `X-GM-MSGID` で 1 通にまとめる。SwiftData の実装 (`MailStoreSwiftData`) も作る。
+**説明:** `MailStore` に `MessageStore` プロトコル、メモリ上の実装、同期処理を作る。同期処理は、初回に 30 日分の見出しを取り、2 回目以降は新しい UID だけを取ってフラグをまとめて確認する。`UIDVALIDITY` が変わったら取り直す。Gmail の同じメールは `X-GM-MSGID` で 1 通にまとめる。Mac に保存する実装 (`FileMessageStore`) も作る。
 
 **受け入れ条件:**
 - [x] 偽の IMAP サーバー相手に、初回の同期・新着・削除・フラグ変更・`UIDVALIDITY` の変化を正しく扱える
 - [x] Gmail で「受信トレイ」と「スター付き」の両方にあるメールが、統合受信トレイに 1 通だけ出る
 - [x] 未読数がサーバー側の数と一致する (受信トレイ。`STATUS (UNSEEN)`)
+- [x] 保存 → 閉じる → 開き直すと、同じメール・同期の進み具合・開いたメールの本文が戻る。開き直したあとの同期は新しいメールだけを取る
+- [x] 壊れたファイル・形式の違うファイルがあっても起動でき、そのアカウントは取り直す。保存フォルダは本人だけが読める (0700)
 
 **確認:**
-- [x] 🐧 `swift test --package-path Packages/MailStore` (2026-11-13 時点で 87 件すべて通過)
+- [x] 🐧 `swift test --package-path Packages/MailStore` (2026-11-14 時点で 105 件すべて通過)
+- [ ] 🍎 Mac で: 起動 → メールを開く → 終了 → もう一度起動すると、すぐに一覧が出て、開いたメールがすぐ表示される
 
 **依存:** T7, T8
-**触るファイル:** `Packages/MailStore/Sources/MailStore/MessageStore.swift`、`InMemoryMessageStore.swift`、`SyncEngine.swift`、`Sources/MailStoreSwiftData/SwiftDataMessageStore.swift`、`Tests/MailStoreTests/SyncEngineTests.swift`
-**大きさ:** L → 着手時に「同期処理」と「SwiftData の実装」の 2 つに分ける
+**触るファイル:** `Packages/MailStore/Sources/MailStore/MessageStore.swift`、`SyncEngine.swift`、`FileMessageStore.swift`、`Tests/MailStoreTests/SyncEngineTests.swift`、`FileMessageStoreTests.swift`、`App/Services/MailService.swift`
+**大きさ:** L → 「同期処理」と「Mac への保存」の 2 つに分けて進めた
 
 ### T11: Yahoo! アカウントを追加すると、本物のメールが一覧に出る
 
-> 状態 (2026-11-13): ✅ アカウント管理 (`AccountDirectory`、テスト 11 件)、画面 (追加シート、設定のアカウント一覧、受信ボタン) ともに済。CI の macOS でビルドとテストが通過。**オーナーの Mac で、実際の Gmail アカウントを追加し、本物のメールが一覧に出ることを確認** (2026-11-13)。保存先はまだメモリ上 (起動のたびに 30 日分を取り直す)
+> 状態 (2026-11-13): ✅ アカウント管理 (`AccountDirectory`、テスト 11 件)、画面 (追加シート、設定のアカウント一覧、受信ボタン) ともに済。CI の macOS でビルドとテストが通過。**オーナーの Mac で、実際の Gmail アカウントを追加し、本物のメールが一覧に出ることを確認** (2026-11-13)。保存先は T10 で Mac の中に (2026-11-14)
 
 **説明:** アカウント追加の画面を作る (メールアドレス、アプリパスワード、表示名、色)。Yahoo!、iCloud、Outlook のサーバー設定は自動で入れる。追加したら接続を確かめ、同期を始め、T5 の一覧に本物のメールが出るようにする (仮の `MailRepository` を本物に差し替える)。
 

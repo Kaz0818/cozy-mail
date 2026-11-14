@@ -104,7 +104,7 @@ public enum MessageFilter: String, Sendable, CaseIterable {
     case starred
 }
 
-public struct Contact: Hashable, Sendable {
+public struct Contact: Hashable, Sendable, Codable {
     public var name: String
     public var address: String
 
@@ -121,7 +121,7 @@ public struct Contact: Hashable, Sendable {
 }
 
 /// 一覧の 1 行に必要な情報。本文は含まない。
-public struct MessageSummary: Identifiable, Hashable, Sendable {
+public struct MessageSummary: Identifiable, Hashable, Sendable, Codable {
     public let id: MessageID
     public var accountID: AccountID
     public var mailbox: MailboxRole

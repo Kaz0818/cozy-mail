@@ -1,7 +1,7 @@
 import Foundation
 
 /// Mac に保存した 1 通のメール。一覧に出す情報 (`summary`) と、サーバーと突き合わせるための情報。
-public struct StoredMessage: Sendable, Hashable {
+public struct StoredMessage: Sendable, Hashable, Codable {
     public var summary: MessageSummary
     /// サーバー上のフォルダ名 (修正 UTF-7 のまま)。
     public var mailbox: String
@@ -39,7 +39,7 @@ public struct MailboxSyncState: Sendable, Hashable, Codable {
     }
 }
 
-/// メールの保存先。アプリでは SwiftData (`MailStoreSwiftData`)、テストではメモリ上 (`InMemoryMessageStore`)。
+/// メールの保存先。アプリでは Mac の中のファイル (`FileMessageStore`)、テストとプレビューではメモリ上 (`InMemoryMessageStore`)。
 public protocol MessageStore: Sendable {
     func syncState(account: AccountID, mailbox: String) async throws -> MailboxSyncState?
     func setSyncState(_ state: MailboxSyncState, account: AccountID, mailbox: String) async throws
