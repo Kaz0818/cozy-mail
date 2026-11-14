@@ -171,7 +171,7 @@ public actor AccountDirectory {
 
     /// ログインを確かめてから、アカウントを保存する。失敗したら何も保存しない。
     public func add(
-        email rawEmail: String, password rawPassword: String, displayName: String, choice: ProviderChoice
+        email rawEmail: String, password rawPassword: String, displayName: String, senderName: String = "", choice: ProviderChoice
     ) async throws(AccountError) -> Account {
         let email = rawEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.looksLikeAddress(email) else { throw .invalidAddress }
@@ -210,7 +210,8 @@ public actor AccountDirectory {
 
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let account = Account(
-            id: AccountID(makeID()), provider: resolved.provider, emailAddress: email, displayName: name.isEmpty ? email : name
+            id: AccountID(makeID()), provider: resolved.provider, emailAddress: email, displayName: name.isEmpty ? email : name,
+            senderName: Self.cleanSenderName(senderName)
         )
         list.append(MailAccountSettings(account: account, imap: resolved.imap, smtp: resolved.smtp))
         do {
@@ -231,6 +232,28 @@ public actor AccountDirectory {
         passwordCache[id] = nil
         try secrets.set(nil, for: Self.passwordKey(id))
         try await messages.deleteAccount(id)
+    }
+
+    /// 差出人の名前を変える (送ったメールで相手に見える名前)。
+    public func setSenderName(_ name: String, for id: AccountID) throws(AccountError) {
+        var list: [MailAccountSettings]
+        do {
+            list = try loadSettings()
+        } catch {
+            throw .storage(String(describing: error))
+        }
+        guard let index = list.firstIndex(where: { $0.account.id == id }) else { throw .notFound }
+        list[index].account.senderName = Self.cleanSenderName(name)
+        do {
+            try save(list)
+        } catch {
+            throw .storage(String(describing: error))
+        }
+    }
+
+    /// 前後の空白と改行を取る (改行はヘッダーに入れられないため)。
+    static func cleanSenderName(_ name: String) -> String {
+        name.components(separatedBy: .newlines).joined(separator: " ").trimmingCharacters(in: .whitespaces)
     }
 
     /// 保存したパスワードでサーバーに接続する (同期に使う)。

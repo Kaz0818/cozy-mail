@@ -31,13 +31,31 @@ public struct Account: Identifiable, Hashable, Sendable, Codable {
     public let id: AccountID
     public var provider: MailProvider
     public var emailAddress: String
+    /// 設定の画面で見分けるための名前 (例: 「Gmail (仕事)」)。相手には見えない。
     public var displayName: String
+    /// 送ったメールの差出人として相手に見える名前 (例: 「山田 太郎」)。空なら、アドレスだけで送る。
+    /// 前の版で保存したアカウントにはこの項目がないので、読み込むときは空になる。
+    public var senderName: String
 
-    public init(id: AccountID, provider: MailProvider, emailAddress: String, displayName: String) {
+    public init(id: AccountID, provider: MailProvider, emailAddress: String, displayName: String, senderName: String = "") {
         self.id = id
         self.provider = provider
         self.emailAddress = emailAddress
         self.displayName = displayName
+        self.senderName = senderName
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, provider, emailAddress, displayName, senderName
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(AccountID.self, forKey: .id)
+        provider = try container.decode(MailProvider.self, forKey: .provider)
+        emailAddress = try container.decode(String.self, forKey: .emailAddress)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        senderName = try container.decodeIfPresent(String.self, forKey: .senderName) ?? ""
     }
 }
 
@@ -94,6 +112,12 @@ public struct Contact: Hashable, Sendable {
         self.name = name
         self.address = address
     }
+
+    /// 画面に出す名前。名前がないメールは、アドレスを出す (空の名前で「?」のアイコンにならないように)。
+    public var displayName: String {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? address : trimmed
+    }
 }
 
 /// 一覧の 1 行に必要な情報。本文は含まない。
@@ -102,6 +126,8 @@ public struct MessageSummary: Identifiable, Hashable, Sendable {
     public var accountID: AccountID
     public var mailbox: MailboxRole
     public var sender: Contact
+    /// 宛先 (To と Cc)。「送信済み」と「下書き」の一覧では、差出人 (自分) の代わりにこれを出す。
+    public var recipients: [Contact]
     public var subject: String
     public var preview: String
     public var date: Date
@@ -115,6 +141,7 @@ public struct MessageSummary: Identifiable, Hashable, Sendable {
         accountID: AccountID,
         mailbox: MailboxRole,
         sender: Contact,
+        recipients: [Contact] = [],
         subject: String,
         preview: String,
         date: Date,
@@ -127,6 +154,7 @@ public struct MessageSummary: Identifiable, Hashable, Sendable {
         self.accountID = accountID
         self.mailbox = mailbox
         self.sender = sender
+        self.recipients = recipients
         self.subject = subject
         self.preview = preview
         self.date = date
@@ -134,6 +162,24 @@ public struct MessageSummary: Identifiable, Hashable, Sendable {
         self.isStarred = isStarred
         self.isFlagged = isFlagged
         self.hasAttachments = hasAttachments
+    }
+}
+
+extension MessageSummary {
+    /// 自分が送った (送る) メールか。「送信済み」と「下書き」。
+    public var isOutgoing: Bool {
+        mailbox == .sent || mailbox == .drafts
+    }
+
+    /// 一覧の行に出す相手。ふつうは差出人、自分が送ったメールは宛先 (なければ差出人)。
+    public var listContacts: [Contact] {
+        isOutgoing && !recipients.isEmpty ? recipients : [sender]
+    }
+
+    /// 一覧の行に出す名前。自分が送ったメールは「宛先: 田中 健一、佐藤」のようにする。
+    public var listTitle: String {
+        let names = listContacts.map(\.displayName).joined(separator: "、")
+        return isOutgoing && !recipients.isEmpty ? "宛先: \(names)" : names
     }
 }
 
