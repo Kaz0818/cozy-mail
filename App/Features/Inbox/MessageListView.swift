@@ -1,3 +1,4 @@
+import AppKit
 import MailStore
 import SwiftUI
 
@@ -31,11 +32,21 @@ struct MessageListView: View {
                             MessageRow(
                                 message: message,
                                 accountName: model.accountName(for: message),
-                                isSelected: model.selectedMessageID == message.id,
+                                isSelected: model.isSelected(message.id),
                                 menu: menu(for: message)
                             ) {
                                 isListFocused = true
-                                Task { await model.selectMessage(message.id) }
+                                // ⌘ + クリックで足す・外す、⇧ + クリックで範囲を選ぶ (T26)
+                                let modifiers = NSEvent.modifierFlags
+                                Task {
+                                    if modifiers.contains(.command) {
+                                        await model.toggleSelection(message.id)
+                                    } else if modifiers.contains(.shift) {
+                                        await model.extendSelection(to: message.id)
+                                    } else {
+                                        await model.selectMessage(message.id)
+                                    }
+                                }
                             }
                         }
                     }

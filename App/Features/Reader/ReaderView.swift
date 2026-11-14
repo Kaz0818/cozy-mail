@@ -15,7 +15,16 @@ struct ReaderView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 16)
                 .padding(.bottom, 8)
-            if let message = model.selectedMessage {
+            if model.isMultiSelecting {
+                // 複数を選んでいるとき (T26)。ツールバーの操作は、選んだすべてに効く
+                ContentUnavailableView(
+                    "\(model.selectedIDs.count) 通を選択中",
+                    systemImage: "envelope.stack",
+                    description: Text("上のボタンや右クリック、キーボードの操作が、選んだすべてのメールに効きます。")
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("reader.multiSelection")
+            } else if let message = model.selectedMessage {
                 MessageContent(model: model, message: message)
                     // メールを変えたら「画像を表示」などの状態を初めに戻す
                     .id(message.id)
@@ -345,43 +354,46 @@ private struct ReaderToolbar: View {
 
     var body: some View {
         let message = model.selectedMessage
+        // 返信・転送は 1 通のときだけ。ほかの操作は、選んでいるすべてに効く (T26)
+        let single = model.isMultiSelecting ? nil : message
+        let star = model.starToggleAction
         HStack(spacing: 10) {
             HStack(spacing: 0) {
-                ToolbarIcon(title: "返信", systemImage: "arrowshape.turn.up.left", isEnabled: message != nil) {
+                ToolbarIcon(title: "返信", systemImage: "arrowshape.turn.up.left", isEnabled: single != nil) {
                     compose(.reply)
                 }
-                ToolbarIcon(title: "全員に返信", systemImage: "arrowshape.turn.up.left.2", isEnabled: message != nil) {
+                ToolbarIcon(title: "全員に返信", systemImage: "arrowshape.turn.up.left.2", isEnabled: single != nil) {
                     compose(.replyAll)
                 }
-                ToolbarIcon(title: "転送", systemImage: "arrowshape.turn.up.right", isEnabled: message != nil) {
+                ToolbarIcon(title: "転送", systemImage: "arrowshape.turn.up.right", isEnabled: single != nil) {
                     compose(.forward)
                 }
             }
             .glassCapsule()
-            ToolbarIcon(title: "削除", systemImage: "trash", isEnabled: model.canPerform(.moveToTrash, on: message)) {
+            ToolbarIcon(title: "削除", systemImage: "trash", isEnabled: model.canPerformOnSelection(.moveToTrash)) {
                 Task { await model.perform(.moveToTrash) }
             }
             .glassCapsule()
-            ToolbarIcon(title: "アーカイブ", systemImage: "archivebox", isEnabled: model.canPerform(.archive, on: message)) {
+            ToolbarIcon(title: "アーカイブ", systemImage: "archivebox", isEnabled: model.canPerformOnSelection(.archive)) {
                 Task { await model.perform(.archive) }
             }
             .glassCapsule()
             ToolbarIcon(
-                title: message?.isStarred == true ? "スターを外す" : "スターを付ける",
-                systemImage: message?.isStarred == true ? "star.fill" : "star",
-                isEnabled: model.canPerform(message?.isStarred == true ? .unstar : .star, on: message)
+                title: star == .unstar ? "スターを外す" : "スターを付ける",
+                systemImage: star == .unstar ? "star.fill" : "star",
+                isEnabled: star.map { model.canPerformOnSelection($0) } ?? false
             ) {
-                Task { await model.perform(message?.isStarred == true ? .unstar : .star) }
+                Task { await model.toggleStar() }
             }
             .glassCapsule()
             Menu {
                 Button("未読にする") { Task { await model.perform(.markUnread) } }
-                    .disabled(!model.canPerform(.markUnread, on: message))
+                    .disabled(!model.canPerformOnSelection(.markUnread))
                 Button("既読にする") { Task { await model.perform(.markRead) } }
-                    .disabled(!model.canPerform(.markRead, on: message))
+                    .disabled(!model.canPerformOnSelection(.markRead))
                 Divider()
                 Button("迷惑メールにする") { Task { await model.perform(.markAsJunk) } }
-                    .disabled(!model.canPerform(.markAsJunk, on: message))
+                    .disabled(!model.canPerformOnSelection(.markAsJunk))
             } label: {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 16, weight: .medium))

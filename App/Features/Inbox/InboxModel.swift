@@ -36,6 +36,9 @@ final class InboxModel {
     /// 検索欄の言葉 (T19)。空白だけでないとき、一覧は検索の結果になる。
     private(set) var searchText = ""
     private(set) var selectedMessageID: MessageID?
+    /// ⌘ / ⇧ + クリック、⌘A で選んだメール (T26)。2 通以上のときは、まとめて操作する。
+    /// 1 通だけのときは `selectedMessageID` だけを入れておく。`selectedMessageID` は、⇧ + クリックの起点にもなる。
+    private(set) var selectedIDs: Set<MessageID> = []
     private(set) var selectedBody: MessageBody?
     /// 本文を取れなかったときの説明。取れたら nil。
     private(set) var bodyError: String?
@@ -152,6 +155,7 @@ final class InboxModel {
 
     func selectMessage(_ id: MessageID?) async {
         selectedMessageID = id
+        selectedIDs = id.map { [$0] } ?? []
         selectedBody = nil
         bodyError = nil
         guard let id else { return }
@@ -169,6 +173,118 @@ final class InboxModel {
         } catch {
             if selectedMessageID == id { bodyError = Self.describe(error, doing: "本文を取得") }
         }
+    }
+
+    // MARK: - 複数の選択 (T26)
+
+    /// 2 通以上を選んでいる。本文の列には「n 通を選択中」と出す。
+    var isMultiSelecting: Bool {
+        selectedIDs.count > 1
+    }
+
+    func isSelected(_ id: MessageID) -> Bool {
+        selectedIDs.contains(id) || selectedMessageID == id
+    }
+
+    /// ⌘ + クリック: 選んだものに足す。選んでいたら外す。1 通に戻ったら、そのメールを開く。
+    func toggleSelection(_ id: MessageID) async {
+        var ids = selectedIDs
+        if let current = selectedMessageID { ids.insert(current) }
+        if ids.contains(id) {
+            ids.remove(id)
+        } else {
+            ids.insert(id)
+        }
+        if ids.count <= 1 {
+            await selectMessage(ids.first)
+            return
+        }
+        selectedIDs = ids
+        // ⇧ + クリックの起点: 足したメール。外したときは、残っている起点 (なければ一覧で最初のもの)
+        if ids.contains(id) {
+            selectedMessageID = id
+        } else if !ids.contains(selectedMessageID ?? id) {
+            selectedMessageID = messages.first { ids.contains($0.id) }?.id
+        }
+        selectedBody = nil
+        bodyError = nil
+    }
+
+    /// ⇧ + クリック: 選んでいたメール (起点) から、押したメールまでをまとめて選ぶ。
+    func extendSelection(to id: MessageID) async {
+        guard let anchor = selectedMessageID,
+              let from = messages.firstIndex(where: { $0.id == anchor }),
+              let to = messages.firstIndex(where: { $0.id == id }) else {
+            await selectMessage(id)
+            return
+        }
+        let range = min(from, to)...max(from, to)
+        guard range.count > 1 else { return }
+        selectedIDs = Set(messages[range].map(\.id))
+        selectedBody = nil
+        bodyError = nil
+    }
+
+    /// ⌘A: 一覧のすべてを選ぶ。
+    func selectAll() {
+        guard messages.count > 1 else { return }
+        selectedIDs = Set(messages.map(\.id))
+        if selectedMessageID == nil { selectedMessageID = messages.first?.id }
+        selectedBody = nil
+        bodyError = nil
+    }
+
+    /// 操作の相手: 複数を選んでいればそのすべて (一覧の順)、そうでなければ選んでいるメール。
+    var selectedMessages: [MessageSummary] {
+        if isMultiSelecting { return messages.filter { selectedIDs.contains($0.id) } }
+        return selectedMessage.map { [$0] } ?? []
+    }
+
+    /// その操作が、選んでいるメールのどれかにできるか (ツールバー・メニューのボタン)。
+    func canPerformOnSelection(_ action: MessageAction) -> Bool {
+        selectedMessages.contains { canPerform(action, on: $0) }
+    }
+
+    /// 既読と未読の入れ替えで行う操作。複数なら、未読が 1 通でもあれば既読にする。
+    var readToggleAction: MessageAction? {
+        let targets = selectedMessages
+        guard !targets.isEmpty else { return nil }
+        return targets.contains { !$0.isRead } ? .markRead : .markUnread
+    }
+
+    /// スターの付け外しで行う操作。複数なら、スターなしが 1 通でもあれば付ける。
+    var starToggleAction: MessageAction? {
+        let targets = selectedMessages
+        guard !targets.isEmpty else { return nil }
+        return targets.contains { !$0.isStarred } ? .star : .unstar
+    }
+
+    /// 選んでいるすべてをまとめて操作する。できるメールだけを、窓口へ 1 回で頼む。
+    private func performOnSelection(_ action: MessageAction) async {
+        let targets = selectedMessages.filter { canPerform(action, on: $0) }
+        guard !targets.isEmpty else { return }
+        actionError = nil
+        let ids = targets.map(\.id)
+        let firstIndex = messages.firstIndex { ids.contains($0.id) }
+        do {
+            try await repository.perform(action, on: ids)
+        } catch {
+            actionError = Self.describe(error, doing: Self.actionName(action))
+        }
+        switch action {
+        case .markRead, .markUnread, .star, .unstar:
+            // 一部だけ失敗したときに備えて、一覧を読み直す (選んだままにする)
+            if let fresh = try? await currentMessages() {
+                messages = fresh
+                selectedIDs = selectedIDs.filter { id in fresh.contains { $0.id == id } }
+            }
+        case .archive, .moveToTrash, .markAsJunk:
+            // 移したメールは一覧から消える。残ったメールのうち、同じ位置のものを 1 通選ぶ
+            selectedIDs = []
+            selectedMessageID = nil
+            await reloadMessages(fallbackIndex: firstIndex)
+        }
+        await refreshCounts()
     }
 
     // MARK: - 整理の操作
@@ -191,7 +307,13 @@ final class InboxModel {
     /// フラグの変更は、その行だけを変える。移動 (アーカイブ・削除・迷惑メール) は一覧を読み直す
     /// (選んでいたメールが消えたら、その次のメールを選ぶ。最後のメールだったら、新しい最後のメール)。
     func perform(_ action: MessageAction, on id: MessageID? = nil) async {
-        guard !isShowingSamples, let id = id ?? selectedMessageID else { return }
+        guard !isShowingSamples else { return }
+        // 複数を選んでいるとき: ボタン・キーボード (id なし) と、選んだ行の右クリックは、選んだすべてに効く
+        if isMultiSelecting, id.map({ selectedIDs.contains($0) }) ?? true {
+            await performOnSelection(action)
+            return
+        }
+        guard let id = id ?? selectedMessageID else { return }
         actionError = nil
         let movedIndex = messages.firstIndex { $0.id == id }
         do {
@@ -280,6 +402,20 @@ final class InboxModel {
             let found = try await currentMessages()
             guard request == (selection, filter, searchText) else { return }
             messages = found
+            if isMultiSelecting {
+                // 一覧から消えたメールは、選んだものから外す
+                selectedIDs = selectedIDs.filter { id in found.contains { $0.id == id } }
+                if isMultiSelecting {
+                    if !selectedIDs.contains(selectedMessageID ?? MessageID("")) {
+                        selectedMessageID = found.first { selectedIDs.contains($0.id) }?.id
+                    }
+                    return
+                }
+                if let remaining = selectedIDs.first {
+                    await selectMessage(remaining)
+                    return
+                }
+            }
             let keepSelection = selectedMessageID.map { id in messages.contains { $0.id == id } } ?? false
             if !keepSelection {
                 // 検索で打っている途中に一番上のメールを開くと、読んでいない未読メールまで既読になってしまう。
@@ -329,14 +465,14 @@ final class InboxModel {
 
     /// 選んでいるメールの既読と未読を入れ替える (`⇧⌘U`)。
     func toggleRead() async {
-        guard let message = selectedMessage else { return }
-        await perform(message.isRead ? .markUnread : .markRead)
+        guard let action = readToggleAction else { return }
+        await perform(action)
     }
 
     /// 選んでいるメールのスターを付け外しする (`⇧⌘L` / `S`)。
     func toggleStar() async {
-        guard let message = selectedMessage else { return }
-        await perform(message.isStarred ? .unstar : .star)
+        guard let action = starToggleAction else { return }
+        await perform(action)
     }
 
     /// 検索欄に移る合図 (`⌘F`)。数が変わったら、画面が検索欄にカーソルを置く。
@@ -415,13 +551,18 @@ enum MessageMenuEntry: Equatable {
 
 extension InboxModel {
     /// 行の右クリックのメニュー。できない操作は灰色にする (見本のメールでは、すべて灰色)。
+    /// 選んでいる行の右クリックでは、選んだすべてを見て決める (T26)。
     func menuEntries(for message: MessageSummary) -> [MessageMenuEntry] {
+        let forSelection = isMultiSelecting && selectedIDs.contains(message.id)
+        let targets = forSelection ? selectedMessages : [message]
         func entry(_ title: String, _ action: MessageAction) -> MessageMenuEntry {
-            .action(title: title, action: action, isEnabled: canPerform(action, on: message))
+            .action(title: title, action: action, isEnabled: targets.contains { canPerform(action, on: $0) })
         }
+        let markRead = targets.contains { !$0.isRead }
+        let star = targets.contains { !$0.isStarred }
         return [
-            message.isRead ? entry("未読にする", .markUnread) : entry("既読にする", .markRead),
-            message.isStarred ? entry("スターを外す", .unstar) : entry("スターを付ける", .star),
+            markRead ? entry("既読にする", .markRead) : entry("未読にする", .markUnread),
+            star ? entry("スターを付ける", .star) : entry("スターを外す", .unstar),
             .separator,
             entry("アーカイブ", .archive),
             entry("削除", .moveToTrash),
