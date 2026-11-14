@@ -66,7 +66,7 @@ xcodebuild test -scheme CozyMail -destination 'platform=macOS'
 ```
 
 - UI テストは `-ui-testing` で起動し、メモリ上だけで動く (本物のアカウントやキーチェーンに触れない)。
-- 2026-11-14 時点のテスト件数 (T28 のあと): MailCore 102 件、MailStore 208 件 (うち SwiftData 21 件は Mac だけ。Linux では 187 件)、AccountKit 19 件、アプリ 144 件 + UI テスト 7 件。減っていたら理由を調べる。
+- 2026-11-15 時点のテスト件数 (Gmail の下書きの修正のあと): MailCore 102 件、MailStore 209 件 (うち SwiftData 21 件は Mac だけ。Linux では 188 件)、AccountKit 19 件、アプリ 144 件 + UI テスト 7 件。減っていたら理由を調べる。
 
 ## CI (GitHub Actions、`.github/workflows/ci.yml`)
 

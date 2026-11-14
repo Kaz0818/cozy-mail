@@ -64,6 +64,41 @@ import Testing
         ])
     }
 
+    /// Gmail: 同期するのは「すべてのメール」などだけだが、下書きフォルダの名前は覚えておき、そこに置ける・消せる。
+    /// (以前は名前を覚えていなかったので、Gmail には下書きが置かれなかった。2026-11-15 オーナーが見つけた)
+    @Test func gmailDraftsGoToTheGmailDraftsFolder() async throws {
+        let gmail = Account(id: AccountID("gmail"), provider: .gmail, emailAddress: "me@gmail.example", displayName: "Gmail")
+        let server = FakeMailServer()
+        await server.addFolder("INBOX")
+        await server.addFolder("[Gmail]/All Mail", specialUse: .all)
+        await server.addFolder("[Gmail]/Drafts", specialUse: .drafts)
+        await server.addFolder("[Gmail]/Spam", specialUse: .junk)
+        await server.addFolder("[Gmail]/Trash", specialUse: .trash)
+        await server.add(.init(uid: 1, date: now, subject: "自分の下書き", from: "me@gmail.example",
+                               messageID: "mine@other.example"), to: "[Gmail]/Drafts")
+        await server.setKeepsAppendedMessages(true)
+        let store = InMemoryMessageStore()
+        let now = now
+        _ = try await SyncEngine(store: store, now: { now }).sync(account: gmail, session: server)
+        // 下書きフォルダの中身は同期しない (「すべてのメール」に入っているため)
+        #expect(!(await server.calls).contains("EXAMINE [Gmail]/Drafts"))
+        await server.clearCalls()
+        let accounts = [gmail]
+        let drafts = ServerDrafts(store: store, accounts: { accounts }, openSession: { _ in server })
+
+        let id = UUID()
+        let draft = SavedDraft(
+            id: id, content: DraftContent(accountID: gmail.id, to: "t@example.com", subject: "Gmail の下書き", body: "本文"),
+            savedAt: now
+        )
+        try await drafts.upload(draft)
+        let expected = ServerDrafts.messageID(for: id, account: gmail)
+        #expect(await server.messageIDs(in: "[Gmail]/Drafts").sorted() == [expected, "mine@other.example"].sorted())
+
+        try await drafts.remove(id: id, accountID: gmail.id)
+        #expect(await server.messageIDs(in: "[Gmail]/Drafts") == ["mine@other.example"])
+    }
+
     /// 検索は「含む」で当たるので、似た Message-ID のメールも見つかる。中身を確かめて、ちょうど同じものだけを消す。
     @Test func lookAlikesAreNeverDeleted() async throws {
         let server = await server()

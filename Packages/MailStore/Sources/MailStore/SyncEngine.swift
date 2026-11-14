@@ -125,6 +125,12 @@ public struct SyncEngine: Sendable {
         for target in targets {
             if let role = target.role, names[role] == nil { names[role] = target.name }
         }
+        // Gmail の下書きフォルダは同期しない (中身は「すべてのメール」にある) が、
+        // 下書きをサーバーに置くとき (T23b) に使うので、名前だけ覚えておく
+        if account.provider == .gmail, names[.drafts] == nil,
+           let drafts = mailboxes.first(where: { $0.isSelectable && $0.specialUse == .drafts }) {
+            names[.drafts] = drafts.rawName
+        }
         try await store.setMailboxNames(names, account: account.id)
         // サイドバーに出す、自分で作ったラベル (Gmail だけ)
         try await store.setLabels(
