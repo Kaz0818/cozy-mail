@@ -12,14 +12,18 @@ private final class BulkSpyRepository: MailRepository, @unchecked Sendable {
 
     init() {
         let base = Date(timeIntervalSince1970: 1_794_000_000)
-        summaries = (1...5).map { number in
-            MessageSummary(
-                id: MessageID("m\(number)"), accountID: AccountID("a"), mailbox: .inbox,
-                sender: Contact(name: "差出人\(number)", address: "s\(number)@example.com"),
-                subject: "件名\(number)", preview: "", date: base.addingTimeInterval(Double(-number) * 60),
-                isRead: number == 4, isStarred: number == 4
-            )
+        // 型を調べるのに時間がかからないよう、式を小さく分ける (CI のコンパイラが諦めたため)
+        var list: [MessageSummary] = []
+        for number in 1...5 {
+            let date: Date = base.addingTimeInterval(Double(-number) * 60)
+            let sender = Contact(name: "差出人\(number)", address: "s\(number)@example.com")
+            let isFourth: Bool = number == 4
+            list.append(MessageSummary(
+                id: MessageID("m\(number)"), accountID: AccountID("a"), mailbox: .inbox, sender: sender,
+                subject: "件名\(number)", preview: "", date: date, isRead: isFourth, isStarred: isFourth
+            ))
         }
+        summaries = list
     }
 
     var batches: [(MessageAction, [MessageID])] { lock.withLock { batchLog } }
