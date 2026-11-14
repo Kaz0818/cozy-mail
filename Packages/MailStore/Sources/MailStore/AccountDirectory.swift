@@ -29,6 +29,8 @@ public enum ProviderChoice: String, CaseIterable, Sendable {
     case yahooJapan
     case yahoo
     case icloud
+    /// そのほか (独自ドメインなど)。サーバー名は手で入れる (`CustomServers`、T28)。
+    case other
 
     public struct Resolved: Sendable, Hashable {
         public var provider: MailProvider
@@ -56,6 +58,9 @@ public enum ProviderChoice: String, CaseIterable, Sendable {
         case .icloud:
             // iCloud の送信は 587 (STARTTLS) だけ。送信 (T17) で STARTTLS に対応する
             return Resolved(provider: .icloud, imap: .init(host: "imap.mail.me.com", port: 993), smtp: .init(host: "smtp.mail.me.com", port: 587))
+        case .other:
+            // サーバー名は入れてもらう (`AccountDirectory.add` の `servers`)
+            return nil
         }
     }
 
@@ -70,12 +75,62 @@ public enum ProviderChoice: String, CaseIterable, Sendable {
     }
 }
 
+/// 「その他」で手で入れるサーバー (T28、US-2)。受信 (IMAP) は 993 (TLS) だけ、送信 (SMTP) は 465 (TLS) か 587 (STARTTLS) だけ。
+/// 暗号化しない接続は選べない。
+public struct CustomServers: Sendable, Hashable {
+    public var imapHost: String
+    public var smtpHost: String
+    public var smtpPort: Int
+
+    public static let imapPort = 993
+    public static let smtpPorts = [465, 587]
+
+    public init(imapHost: String, smtpHost: String, smtpPort: Int) {
+        self.imapHost = imapHost
+        self.smtpHost = smtpHost
+        self.smtpPort = smtpPort
+    }
+
+    /// 入れ方を確かめ、保存する形にする (前後の空白を取り、小文字にする)。おかしければ、つなぐ前に断る。
+    public func validated() throws(AccountError) -> (imap: ServerSettings, smtp: ServerSettings) {
+        guard let imap = Self.hostName(imapHost) else { throw .invalidServerName(.incoming) }
+        guard let smtp = Self.hostName(smtpHost) else { throw .invalidServerName(.outgoing) }
+        guard Self.smtpPorts.contains(smtpPort) else { throw .unsupportedPort(smtpPort) }
+        return (ServerSettings(host: imap, port: Self.imapPort), ServerSettings(host: smtp, port: smtpPort))
+    }
+
+    /// サーバー名として使える形なら、整えたもの。英数字とハイフンの区切りを点でつないだもの (点が 1 つ以上)。
+    /// 「https://」やポート (「:993」) が付いたもの、日本語の名前 (使うなら xn-- の形で入れる) は受け付けない。
+    static func hostName(_ raw: String) -> String? {
+        let host = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false)
+        guard host.count <= 253, labels.count >= 2 else { return nil }
+        for label in labels {
+            guard !label.isEmpty, label.count <= 63, label.first != "-", label.last != "-",
+                  label.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-") }) else { return nil }
+        }
+        return host
+    }
+}
+
+/// 手で入れるサーバーのどちらか。
+public enum ServerRole: Sendable, Equatable {
+    /// 受信 (IMAP)。
+    case incoming
+    /// 送信 (SMTP)。
+    case outgoing
+}
+
 public enum AccountError: Error, Equatable, Sendable {
     case invalidAddress
     case emptyPassword
     /// アドレスからメールの種類が分からない。画面で種類を選んでもらう。
     case unknownProvider
     case alreadyAdded
+    /// 手で入れたサーバー名の形が正しくない (T28)。
+    case invalidServerName(ServerRole)
+    /// 使えない送信のポート (暗号化しないものなど、T28)。
+    case unsupportedPort(Int)
     /// ログインできない (パスワードが違う、アプリパスワードではない、IMAP が無効、など)。
     case wrongPassword(String)
     case cannotConnect(String)
@@ -171,11 +226,20 @@ public actor AccountDirectory {
 
     /// ログインを確かめてから、アカウントを保存する。失敗したら何も保存しない。
     public func add(
-        email rawEmail: String, password rawPassword: String, displayName: String, senderName: String = "", choice: ProviderChoice
+        email rawEmail: String, password rawPassword: String, displayName: String, senderName: String = "", choice: ProviderChoice,
+        servers: CustomServers? = nil
     ) async throws(AccountError) -> Account {
         let email = rawEmail.trimmingCharacters(in: .whitespacesAndNewlines)
         guard Self.looksLikeAddress(email) else { throw .invalidAddress }
-        guard let resolved = choice.resolve(email: email) else { throw .unknownProvider }
+        let resolved: ProviderChoice.Resolved
+        if choice == .other {
+            // 「その他」: 手で入れたサーバー (T28)。なければ、受信サーバーの名前がないものとして断る
+            let custom = try (servers ?? CustomServers(imapHost: "", smtpHost: "", smtpPort: 465)).validated()
+            resolved = ProviderChoice.Resolved(provider: .other, imap: custom.imap, smtp: custom.smtp)
+        } else {
+            guard let preset = choice.resolve(email: email) else { throw .unknownProvider }
+            resolved = preset
+        }
         // Gmail のアプリパスワードは 4 文字ずつ空白で区切って表示されるので、空白を除く
         let password = resolved.provider == .gmail
             ? rawPassword.filter { !$0.isWhitespace }
@@ -207,6 +271,10 @@ public actor AccountDirectory {
         } catch {
             throw .cannotConnect(String(describing: error))
         }
+        // 手で入れた送信用サーバーにも、ログインできることを確かめる (決まった種類のサーバーは、名前が分かっているので確かめない)
+        if choice == .other {
+            try await checkSending(to: resolved.smtp, email: email, password: password)
+        }
 
         let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         let account = Account(
@@ -223,6 +291,24 @@ public actor AccountDirectory {
             throw .storage(String(describing: error))
         }
         return account
+    }
+
+    /// 送信用サーバーに、暗号化してログインできるか確かめる。
+    private func checkSending(to settings: ServerSettings, email: String, password: String) async throws(AccountError) {
+        do {
+            let session = try await senderConnector(
+                SMTPServer(host: settings.host, port: settings.port), .password(username: email, password: password)
+            )
+            await session.close()
+        } catch let error as SMTPError {
+            switch error {
+            case let .authenticationFailed(reason): throw .wrongPassword(reason)
+            case .encryptionUnavailable: throw .cannotConnect("送信サーバーが暗号化 (STARTTLS) に対応していません")
+            default: throw .cannotConnect("送信サーバー: \(error.description)")
+            }
+        } catch {
+            throw .cannotConnect("送信サーバー: \(String(describing: error))")
+        }
     }
 
     /// アカウントを削除する。パスワードと、保存していたメールも消す。
