@@ -598,13 +598,18 @@
 
 **受け入れ条件:**
 - [ ] アカウントごとに署名を書いて残せる (US-16)
-- [ ] 新規作成では本文の最後、返信・転送では引用の上に「-- 」と署名が入る
-- [ ] 差出人を変えると、署名が入れ替わる (自分で書いた本文は消えない)
-- [ ] 署名が空なら何も入らない
+- [x] 新規作成では本文の最後、返信・転送では引用の上に「-- 」と署名が入る
+- [x] 差出人を変えると、署名が入れ替わる (自分で書いた本文は消えない)
+- [x] 署名が空なら何も入らない
 
 **確認:**
-- [ ] 🐧 署名の入れ方・入れ替え方のテスト (`Composer`)
+- [x] 🐧 署名の入れ方・入れ替え方のテスト (`Composer`)
 - [ ] 🍎 署名を設定して、新規作成・返信で入る
+
+> 状態 (2026-11-14): 🐧 済み。`Composer.draft(..., signature:)` が署名を入れ、`Composer.replacingSignature` が差出人を変えたときに入れ替える (手で消した署名は戻さない)。`SignatureStore` (MailStore) が UserDefaults の `signatures.v1` に保存する (アカウント一覧の保存の形は変えていない)。設定の「アカウント」に署名の欄。アカウントを消すと署名も消える。
+> - テスト: `SignatureTests` 9 件・`SignatureStoreTests` 3 件 (MailStore)、`ComposeModelSignatureTests` 4 件・`MailServiceSignatureTests` 1 件 (アプリ)。
+> - □ のまま: 「アカウントごとに書いて残せる」は保存の部分をテストしたが、設定画面での入力は Claude が画面で確かめていない。
+> - 決めたこと (あとから変えられる): 区切りは「-- 」(メールの決まりごと)。返信・転送では引用の上 (Gmail と同じ)。署名の欄は、欄から離れたときに保存する。
 
 **依存:** T18
 **触るファイル:** `Packages/MailStore/Sources/MailStore/Composer.swift`、`SignatureStore.swift` (新規)、`App/Features/Accounts/AccountsSettings.swift`、`App/Features/Compose/ComposeModel.swift`、テスト

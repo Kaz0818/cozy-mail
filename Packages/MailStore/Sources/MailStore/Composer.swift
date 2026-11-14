@@ -22,6 +22,8 @@ public struct Draft: Sendable, Equatable {
     public var inReplyTo: String?
     /// 返信のとき、スレッドをつなぐための Message-ID の並び (`<>` なし)。
     public var references: [String]
+    /// 返信・転送のとき、本文の下に付く引用 (または転送するメール) の部分。差出人を変えて署名を入れ直すときの目印 (T25)。
+    public var quote: String
 
     public init(
         accountID: AccountID? = nil,
@@ -32,8 +34,10 @@ public struct Draft: Sendable, Equatable {
         body: String = "",
         attachments: [DraftAttachment] = [],
         inReplyTo: String? = nil,
-        references: [String] = []
+        references: [String] = [],
+        quote: String = ""
     ) {
+        self.quote = quote
         self.accountID = accountID
         self.to = to
         self.cc = cc
@@ -126,14 +130,19 @@ public enum Composer {
     ///   - source: 元のメール (新規作成なら nil)。
     ///   - myAddresses: 自分のアドレス (すべてのアカウント)。全員に返信の宛先から除く。
     ///   - defaultAccount: 新規作成のときの差出人。
+    ///   - signature: 差出人のアカウントの署名 (T25)。新規作成では本文の最後、返信・転送では引用の上に「-- 」と一緒に入れる。
     public static func draft(
         _ kind: ComposeKind,
         replyingTo source: ReplySource?,
         myAddresses: [String],
         defaultAccount: AccountID?,
+        signature: String = "",
         timeZone: TimeZone = .current
     ) -> Draft {
-        guard let source, kind != .new else { return Draft(accountID: defaultAccount) }
+        let block = signatureBlock(signature)
+        guard let source, kind != .new else {
+            return Draft(accountID: defaultAccount, body: block.isEmpty ? "" : "\n\n" + block)
+        }
         let mine = Set(myAddresses.map { $0.lowercased() })
         let isMine = { (contact: Contact) in mine.contains(contact.address.lowercased()) }
         // 自分が送ったメールに返信するときは、元の宛先に送る (Gmail と同じ)
@@ -162,14 +171,16 @@ public enum Composer {
         switch kind {
         case .reply, .replyAll:
             draft.subject = replySubject(source.subject)
-            draft.body = "\n\n" + quoteHeader(source, timeZone: timeZone) + "\n" + quoted(source.text)
+            draft.quote = quoteHeader(source, timeZone: timeZone) + "\n" + quoted(source.text)
+            draft.body = "\n\n" + (block.isEmpty ? "" : block + "\n\n") + draft.quote
             if let messageID = source.messageID {
                 draft.inReplyTo = messageID
                 draft.references = source.references.filter { $0 != messageID } + [messageID]
             }
         case .forward:
             draft.subject = forwardSubject(source.subject)
-            draft.body = "\n\n" + forwardHeader(source, timeZone: timeZone) + "\n\n" + source.text
+            draft.quote = forwardHeader(source, timeZone: timeZone) + "\n\n" + source.text
+            draft.body = "\n\n" + (block.isEmpty ? "" : block + "\n\n") + draft.quote
             draft.attachments = source.attachments
         case .new:
             break
@@ -202,6 +213,38 @@ public enum Composer {
     private static func hasPrefix(_ subject: String, _ prefixes: [String]) -> Bool {
         let lowered = subject.trimmingCharacters(in: .whitespaces).lowercased()
         return prefixes.contains { lowered.hasPrefix($0) }
+    }
+
+    // MARK: - 署名 (T25)
+
+    /// 署名の区切り (メールの決まりごと「-- 」+ 改行)。メールソフトはこの下を署名と見なす。
+    public static let signatureSeparator = "-- \n"
+
+    /// 本文に入れる署名の塊。空の署名なら空。
+    static func signatureBlock(_ signature: String) -> String {
+        let trimmed = signature.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "" : signatureSeparator + trimmed
+    }
+
+    /// 差出人を変えたときに、署名を入れ替える。書いた本文はそのまま。
+    /// - 前の署名が本文にあれば、新しい署名に置き換える (新しい署名が空なら消す)。手で消していたら、何もしない。
+    /// - 前のアカウントに署名がなければ、引用 (`quote`) の上に入れる。引用がなければ本文の最後に足す。
+    public static func replacingSignature(in body: String, old: String, new: String, quote: String) -> String {
+        let oldBlock = signatureBlock(old)
+        let newBlock = signatureBlock(new)
+        var body = body
+        if !oldBlock.isEmpty {
+            guard let range = body.range(of: "\n\n" + oldBlock) else { return body }
+            body.replaceSubrange(range, with: newBlock.isEmpty ? "" : "\n\n" + newBlock)
+            return body
+        }
+        guard !newBlock.isEmpty else { return body }
+        if !quote.isEmpty, let range = body.range(of: "\n\n" + quote, options: .backwards) {
+            body.insert(contentsOf: "\n\n" + newBlock, at: range.lowerBound)
+        } else {
+            body += "\n\n" + newBlock
+        }
+        return body
     }
 
     // MARK: - 引用

@@ -23,7 +23,7 @@ struct ComposeWindow: View {
         .background(AppBackground())
         .navigationTitle(model?.windowTitle ?? "新規メッセージ")
         .task {
-            let model = ComposeModel(repository: service.repository)
+            let model = ComposeModel(repository: service.repository, signatures: service.signatures)
             self.model = model
             await model.load(request)
         }

@@ -38,7 +38,15 @@ struct ComposeRequest: Codable, Hashable {
 /// 作成ウィンドウの中身 (T18)。宛先は打った文字のまま持ち、送るときに読む。
 @MainActor @Observable
 final class ComposeModel {
-    var accountID: AccountID?
+    /// 差出人。変えると、本文の署名も入れ替える (T25)。
+    var accountID: AccountID? {
+        didSet {
+            guard !isLoading, oldValue != accountID else { return }
+            body = Composer.replacingSignature(
+                in: body, old: signature(for: oldValue), new: signature(for: accountID), quote: quote
+            )
+        }
+    }
     var to = ""
     var cc = ""
     var bcc = ""
@@ -56,10 +64,20 @@ final class ComposeModel {
 
     private var inReplyTo: String?
     private var references: [String] = []
+    /// 返信・転送の引用の部分 (署名を入れ直すときの目印)。
+    private var quote = ""
+    /// アカウントごとの署名 (開いたときに読む)。
+    private var signatureTexts: [AccountID: String] = [:]
     private let repository: any MailRepository
+    private let signatures: SignatureStore?
 
-    init(repository: any MailRepository) {
+    init(repository: any MailRepository, signatures: SignatureStore? = nil) {
         self.repository = repository
+        self.signatures = signatures
+    }
+
+    private func signature(for id: AccountID?) -> String {
+        id.flatMap { signatureTexts[$0] } ?? ""
     }
 
     /// 依頼に合わせて中身を作る。返信・転送では元のメールを読み、宛先・件名・引用を入れる。
@@ -76,8 +94,11 @@ final class ComposeModel {
                 errorMessage = "元のメールを読めませんでした。\n\(Self.describe(error))"
             }
         }
+        signatureTexts = await signatures?.all() ?? [:]
+        let sender = request.kind == .new ? fallback : (source?.accountID ?? fallback)
         let draft = Composer.draft(
-            request.composeKind, replyingTo: source, myAddresses: accounts.map(\.emailAddress), defaultAccount: fallback
+            request.composeKind, replyingTo: source, myAddresses: accounts.map(\.emailAddress), defaultAccount: fallback,
+            signature: signature(for: sender)
         )
         accountID = draft.accountID ?? fallback
         to = Composer.format(draft.to)
@@ -89,6 +110,7 @@ final class ComposeModel {
         attachments = draft.attachments
         inReplyTo = draft.inReplyTo
         references = draft.references
+        quote = draft.quote
     }
 
     /// 打った宛先を読み、送れる形にする。読めない宛先があれば `invalidAddress`。
