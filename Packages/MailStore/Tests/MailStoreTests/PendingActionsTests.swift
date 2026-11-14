@@ -145,7 +145,9 @@ import Testing
         await s.network.set(online: true)
         try await s.repository.perform(.markUnread, on: target.summary.id)
 
-        #expect(await server.calls == ["STORE INBOX +\\Seen [11]", "STORE INBOX -\\Seen [11]"])
+        // 1 回つないで両方送り、閉じる
+        let calls = await server.calls
+        #expect(calls == ["STORE INBOX +\\Seen [11]", "STORE INBOX -\\Seen [11]", "CLOSE"])
         #expect(await s.queue.pending().isEmpty)
         #expect(try await message(s.store, account: yahoo, mailbox: "INBOX", uid: 11).summary.isRead == false)
     }
