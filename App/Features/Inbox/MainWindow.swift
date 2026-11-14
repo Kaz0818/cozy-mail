@@ -1,3 +1,4 @@
+import AppKit
 import MailStore
 import SwiftUI
 
@@ -37,6 +38,10 @@ struct MainWindow: View {
         // アカウントの追加・削除や同期のたびに、画面のデータを読み直す
         .task(id: service.revision) {
             await model.use(service.repository, showingSamples: service.isShowingSamples)
+        }
+        // Dock のアイコンの未読数 (T30)。数が変わるたびに付け替える。nil なら外す
+        .onChange(of: model.dockBadgeLabel, initial: true) { _, label in
+            NSApplication.shared.dockTile.badgeLabel = label
         }
     }
 }
