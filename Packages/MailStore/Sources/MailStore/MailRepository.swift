@@ -27,6 +27,9 @@ public protocol MailRepository: Sendable {
     func replySource(for id: MessageID) async throws -> ReplySource
     /// メールを送る (T18)。送ったあと、Gmail 以外は「送信済み」フォルダにも入れる。
     func send(_ draft: Draft) async throws -> SendOutcome
+    /// 受信トレイをすべて既読にする。Mac に保存していない古い未読も、サーバーで既読にする。
+    /// `account` が nil なら、すべてのアカウント。返すのは、サーバーで既読にした数。
+    func markInboxRead(account: AccountID?) async throws -> Int
 }
 
 /// 送信の結果。
@@ -58,6 +61,11 @@ extension MailRepository {
     }
 
     public func send(_ draft: Draft) async throws -> SendOutcome {
+        throw MailRepositoryError.actionUnavailable
+    }
+
+    /// サーバーにつながない窓口 (見本のメール、テスト用のものなど) の既定: できない。
+    public func markInboxRead(account: AccountID?) async throws -> Int {
         throw MailRepositoryError.actionUnavailable
     }
 

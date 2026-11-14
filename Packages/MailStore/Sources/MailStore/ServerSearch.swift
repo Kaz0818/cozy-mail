@@ -206,6 +206,10 @@ public struct ServerSearchRepository: MailRepository {
 
     public func accounts() async throws -> [Account] { try await base.accounts() }
 
+    public func markInboxRead(account: AccountID?) async throws -> Int {
+        try await base.markInboxRead(account: account)
+    }
+
     public func messages(in selection: MailboxSelection, filter: MessageFilter) async throws -> [MessageSummary] {
         try await base.messages(in: selection, filter: filter)
     }

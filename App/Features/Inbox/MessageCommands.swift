@@ -77,6 +77,10 @@ struct MessageCommands: Commands {
             Button("迷惑メールにする") { run { await $0.perform(.markAsJunk) } }
                 .keyboardShortcut("j", modifiers: [.command, .shift])
                 .disabled(!can(.markAsJunk))
+            Divider()
+            // 確かめのダイアログを出してから行う (Mac に保存していない古い未読も既読にする)
+            Button("受信トレイをすべて既読にする…") { model?.askToMarkInboxRead() }
+                .disabled(!(model?.canMarkInboxRead ?? false))
         }
     }
 

@@ -322,6 +322,21 @@ public actor IMAPSession {
         return uids.sorted()
     }
 
+    // MARK: - 受信トレイをすべて既読にする
+
+    /// まだ読んでいないメールの UID を、小さい順に返す (`UID SEARCH UNSEEN`)。Mac に保存していない古いメールも含む。
+    public func searchUnreadUIDs(in mailbox: String) async throws(IMAPError) -> [UInt32] {
+        try await ensureExamined(mailbox)
+        let responses = try await run(.uidSearch(key: .unseen))
+        var uids: [UInt32] = []
+        for response in responses {
+            if case let .untagged(.mailboxData(.search(ids, _))) = response {
+                uids.append(contentsOf: ids.map(\.rawValue))
+            }
+        }
+        return uids.sorted()
+    }
+
     // MARK: - サーバーの下書き (T23b)
 
     /// 見出し (`field`) に `value` を含むメールの UID を、小さい順に返す (`UID SEARCH HEADER`)。
