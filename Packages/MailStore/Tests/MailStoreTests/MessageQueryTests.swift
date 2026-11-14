@@ -14,6 +14,9 @@ import Testing
     private static let removed = AccountID("removed")
     private static let registered: Set<AccountID> = [first, second]
 
+    /// Gmail のラベルの付き方 (メールごとに順に使う)。「仕事」と、その下の「仕事/経理」は別のラベル。
+    private static let labelPatterns: [[String]] = [["仕事"], ["仕事/経理"], ["\\Important", "仕事", "趣味"], []]
+
     /// アカウント・フォルダ・既読・スターのすべての組み合わせ (3 × 6 × 2 × 2 = 72 通)。日付は入れた順と関係なくばらばら。
     private static func everyKindOfMessage() -> [StoredMessage] {
         var messages: [StoredMessage] = []
@@ -38,7 +41,8 @@ import Testing
                                 isFlagged: isStarred
                             ),
                             mailbox: role.rawValue,
-                            uid: number
+                            uid: number,
+                            labels: labelPatterns[Int(number) % labelPatterns.count]
                         ))
                     }
                 }
@@ -48,9 +52,13 @@ import Testing
     }
 
     private static var everySelection: [MailboxSelection] {
-        MailboxRole.allCases.flatMap { role in
+        let folders: [MailboxSelection] = MailboxRole.allCases.flatMap { role in
             [.unified(role), .account(first, role), .account(second, role), .account(removed, role)]
         }
+        let labels: [MailboxSelection] = ["仕事", "仕事/経理", "趣味", "ない"].flatMap { label in
+            [.label(first, label), .label(second, label), .label(removed, label)]
+        }
+        return folders + labels
     }
 
     /// すべてのフォルダ × すべての絞り込みで、一覧 (新しい順) と未読数が、画面の決まりで数えたものと同じ。
@@ -61,8 +69,9 @@ import Testing
         for selection in Self.everySelection {
             for filter in MessageFilter.allCases {
                 let query = MessageQuery(accounts: Self.registered, selection: selection, filter: filter)
-                let expected = messages.map(\.summary)
-                    .filter { Self.registered.contains($0.accountID) && selection.contains($0) && filter.matches($0) }
+                let expected = messages
+                    .filter { Self.registered.contains($0.summary.accountID) && selection.contains($0.summary, labels: $0.labels) && filter.matches($0.summary) }
+                    .map(\.summary)
                     .sorted { $0.date > $1.date }
 
                 #expect(try await store.summaries(matching: query) == expected, "\(selection) \(filter)")
@@ -76,6 +85,11 @@ import Testing
         // スター付きは、迷惑メールとゴミ箱を除く 4 フォルダ × 既読・未読 × 2 アカウント
         #expect(try await store.summaries(matching: MessageQuery(accounts: Self.registered, selection: .unified(.starred))).count == 16)
         #expect(try await store.summaries(matching: MessageQuery(accounts: Self.registered, selection: .account(Self.removed, .inbox))).isEmpty)
+        // ラベル「仕事」: 1 つのアカウントの 24 通のうち、パターン 0 と 2 の 12 通から、迷惑メールとゴミ箱の 4 通を除いた 8 通
+        // (「仕事/経理」だけのメールは入らない)
+        let work = try await store.summaries(matching: MessageQuery(accounts: Self.registered, selection: .label(Self.first, "仕事")))
+        #expect(work.count == 8)
+        #expect(work.allSatisfy { $0.accountID == Self.first && $0.mailbox != .junk && $0.mailbox != .trash })
 
         // 登録中のアカウントが 1 つもなければ、何も出さない (削除したアカウントのメールが残っていても)
         let nobody = MessageQuery(accounts: [], selection: .unified(.inbox))

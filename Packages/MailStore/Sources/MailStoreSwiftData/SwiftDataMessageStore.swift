@@ -3,8 +3,8 @@ import Foundation
 import MailStore
 import SwiftData
 
-/// SwiftData に保存するモデルの第 1 版。形を変えるときは `MailSchemaV2` を足し、`MailMigrationPlan` に移行の手順を書く
-/// (保存済みのメールを捨てずに済ませるため。SPEC 9 章「先に相談する」)。
+/// SwiftData に保存するモデルの第 1 版 (2026-11-14、T10)。いまは第 2 版 (`MailSchemaV2`) を使う。
+/// 第 1 版で保存したファイルを開いたときの移行のために残す。**中身は変えない** (変えると移行できなくなる)。
 enum MailSchemaV1: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
     static var models: [any PersistentModel.Type] { [MailRecord.self, RawMessageRecord.self, SyncStateRecord.self, AccountRecord.self] }
@@ -105,14 +105,140 @@ enum MailSchemaV1: VersionedSchema {
     }
 }
 
-typealias MailRecord = MailSchemaV1.MailRecord
-typealias RawMessageRecord = MailSchemaV1.RawMessageRecord
-typealias SyncStateRecord = MailSchemaV1.SyncStateRecord
-typealias AccountRecord = MailSchemaV1.AccountRecord
+
+/// SwiftData に保存するモデルの第 2 版 (2026-11-14、T13: Gmail のラベル)。第 1 版との違い:
+/// - `MailRecord.labelKey`: ラベルをデータベースの中で探せる形にした文字列 (`[String]` のままでは、データベースで探せないため)。
+/// - `AccountRecord.labelNames`: アカウントごとの、自分で作ったラベルの一覧。
+///
+/// 形を変えるときは `MailSchemaV3` を足し、`MailMigrationPlan` に移行の手順を書く
+/// (保存済みのメールを捨てずに済ませるため。SPEC 9 章「先に相談する」)。
+enum MailSchemaV2: VersionedSchema {
+    static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
+    static var models: [any PersistentModel.Type] { [MailRecord.self, RawMessageRecord.self, SyncStateRecord.self, AccountRecord.self] }
+
+    /// メール 1 通の見出しと、サーバーと突き合わせるための情報。本文の生データは別の `RawMessageRecord` に置く
+    /// (一覧のために何年分も読み込んでも、本文は読まないで済むように)。
+    @Model final class MailRecord {
+        // フォルダごとの一覧・UID での検索・日付順の取り出しが、メールが増えても遅くならないための索引
+        #Index<MailRecord>([\.accountID, \.mailbox, \.uid], [\.accountID, \.mailbox], [\.date])
+
+        @Attribute(.unique) var key: String
+        var accountID: String
+        var mailbox: String
+        /// UInt32 の UID。
+        var uid: Int64
+        var role: String
+        var senderName: String
+        var senderAddress: String
+        /// 宛先 (`[ContactRecord]` を JSON にしたもの)。
+        var recipients: Data
+        var subject: String
+        var preview: String
+        var date: Date
+        var isRead: Bool
+        var isStarred: Bool
+        var isFlagged: Bool
+        var hasAttachments: Bool
+        /// Gmail の ID は UInt64。ビットをそのまま Int64 に入れる (大きい値も欠けない)。
+        var gmailMessageID: Int64?
+        var gmailThreadID: Int64?
+        var labels: [String]
+        /// `labels` を、データベースの中で探せる 1 つの文字列にしたもの (`SwiftDataMessageStore.labelKey(for:)`)。
+        /// 第 1 版から移したときは、移行の手順 (`MailMigrationPlan`) で埋める。
+        var labelKey: String = ""
+
+        init(
+            key: String, accountID: String, mailbox: String, uid: Int64, role: String,
+            senderName: String, senderAddress: String, recipients: Data, subject: String, preview: String, date: Date,
+            isRead: Bool, isStarred: Bool, isFlagged: Bool, hasAttachments: Bool,
+            gmailMessageID: Int64?, gmailThreadID: Int64?, labels: [String]
+        ) {
+            self.key = key
+            self.accountID = accountID
+            self.mailbox = mailbox
+            self.uid = uid
+            self.role = role
+            self.senderName = senderName
+            self.senderAddress = senderAddress
+            self.recipients = recipients
+            self.subject = subject
+            self.preview = preview
+            self.date = date
+            self.isRead = isRead
+            self.isStarred = isStarred
+            self.isFlagged = isFlagged
+            self.hasAttachments = hasAttachments
+            self.gmailMessageID = gmailMessageID
+            self.gmailThreadID = gmailThreadID
+            self.labels = labels
+            labelKey = SwiftDataMessageStore.labelKey(for: labels)
+        }
+    }
+
+    /// 取得したメール全体 (本文と添付)。大きいものは SwiftData がデータベースの外のファイルに置く。
+    @Model final class RawMessageRecord {
+        @Attribute(.unique) var key: String
+        @Attribute(.externalStorage) var data: Data
+
+        init(key: String, data: Data) {
+            self.key = key
+            self.data = data
+        }
+    }
+
+    /// フォルダごとの同期の進み具合 (`UIDVALIDITY` と取得済みの最大 UID)。
+    @Model final class SyncStateRecord {
+        @Attribute(.unique) var key: String
+        var accountID: String
+        var mailbox: String
+        var uidValidity: Int64
+        var highestUID: Int64
+
+        init(key: String, accountID: String, mailbox: String, uidValidity: Int64, highestUID: Int64) {
+            self.key = key
+            self.accountID = accountID
+            self.mailbox = mailbox
+            self.uidValidity = uidValidity
+            self.highestUID = highestUID
+        }
+    }
+
+    /// アカウントごとの小さな情報 (受信トレイの未読数、役割ごとのフォルダ名、ラベルの一覧)。
+    @Model final class AccountRecord {
+        @Attribute(.unique) var accountID: String
+        var inboxUnread: Int?
+        /// `[MailboxRole.rawValue: フォルダ名]` を JSON にしたもの。
+        var mailboxNames: Data?
+        /// 自分で作った Gmail のラベルの一覧 (`[String]` を JSON にしたもの)。
+        var labelNames: Data?
+
+        init(accountID: String) {
+            self.accountID = accountID
+        }
+    }
+}
+
+typealias MailRecord = MailSchemaV2.MailRecord
+typealias RawMessageRecord = MailSchemaV2.RawMessageRecord
+typealias SyncStateRecord = MailSchemaV2.SyncStateRecord
+typealias AccountRecord = MailSchemaV2.AccountRecord
 
 enum MailMigrationPlan: SchemaMigrationPlan {
-    static var schemas: [any VersionedSchema.Type] { [MailSchemaV1.self] }
-    static var stages: [MigrationStage] { [] }
+    static var schemas: [any VersionedSchema.Type] { [MailSchemaV1.self, MailSchemaV2.self] }
+    static var stages: [MigrationStage] { [v1ToV2] }
+
+    /// 第 1 版 → 第 2 版: 列を足し (中身はそのまま)、保存済みのメールの `labelKey` をラベルから埋める。
+    static let v1ToV2 = MigrationStage.custom(
+        fromVersion: MailSchemaV1.self,
+        toVersion: MailSchemaV2.self,
+        willMigrate: nil,
+        didMigrate: { context in
+            for record in try context.fetch(FetchDescriptor<MailSchemaV2.MailRecord>()) {
+                record.labelKey = SwiftDataMessageStore.labelKey(for: record.labels)
+            }
+            try context.save()
+        }
+    )
 }
 
 private struct ContactRecord: Codable {
@@ -141,12 +267,12 @@ public actor SwiftDataMessageStore: MessageStore {
         // 既にあったフォルダの権限も締める
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
         let configuration = ModelConfiguration(
-            schema: Schema(versionedSchema: MailSchemaV1.self),
+            schema: Schema(versionedSchema: MailSchemaV2.self),
             url: directory.appendingPathComponent(Self.fileName),
             cloudKitDatabase: .none
         )
         let container = try ModelContainer(
-            for: Schema(versionedSchema: MailSchemaV1.self),
+            for: Schema(versionedSchema: MailSchemaV2.self),
             migrationPlan: MailMigrationPlan.self,
             configurations: configuration
         )
@@ -306,7 +432,26 @@ public actor SwiftDataMessageStore: MessageStore {
         try modelContext.save()
     }
 
+    public func labels(account: AccountID) throws -> [String] {
+        guard let data = try accountRecord(account, create: false)?.labelNames else { return [] }
+        return try JSONDecoder().decode([String].self, from: data)
+    }
+
+    public func setLabels(_ labels: [String], account: AccountID) throws {
+        try accountRecord(account, create: true)?.labelNames = JSONEncoder().encode(labels)
+        try modelContext.save()
+    }
+
     // MARK: - 補助
+
+    /// ラベルの区切り。ラベルの名前には現れない制御文字 (情報分離記号)。
+    private static let labelSeparator = "\u{1F}"
+
+    /// ラベルを、データベースの中で「含む」で探せる 1 つの文字列にする。前後にも区切りを付けるので、
+    /// 「仕事」を探したときに「仕事/経理」には当たらない。
+    static func labelKey(for labels: [String]) -> String {
+        labels.isEmpty ? "" : labelSeparator + labels.joined(separator: labelSeparator) + labelSeparator
+    }
 
     /// メールと、その本文の生データをまとめて消す。
     private func remove(_ records: [MailRecord]) throws {
@@ -345,11 +490,16 @@ public actor SwiftDataMessageStore: MessageStore {
         guard !accountIDs.isEmpty else { return nil }
 
         // フォルダの条件
-        var role: String? = selection.role.rawValue
+        var role: String? = selection.role?.rawValue
         var mustBeUnread = unreadOnly || query.filter == .unread
         var mustBeStarred = query.filter == .starred
         var hidesJunkAndTrash = false
+        // ラベル: そのラベルが付いたメール (迷惑メールとゴミ箱を除く)。区切りごと探すので、名前の一部には当たらない
+        var labelPattern = ""
         switch selection.role {
+        case nil:
+            labelPattern = labelKey(for: [selection.label ?? ""])
+            hidesJunkAndTrash = true
         case .starred:
             // スター付き: 迷惑メールとゴミ箱を除く、どのフォルダでも
             role = nil
@@ -364,6 +514,7 @@ public actor SwiftDataMessageStore: MessageStore {
         }
         let anyRole = role == nil
         let roleValue = role ?? ""
+        let anyLabel = labelPattern.isEmpty
         let junk = MailboxRole.junk.rawValue
         let trash = MailboxRole.trash.rawValue
 
@@ -372,6 +523,7 @@ public actor SwiftDataMessageStore: MessageStore {
                 && (anyRole || record.role == roleValue)
                 && (!mustBeUnread || !record.isRead)
                 && (!mustBeStarred || record.isStarred)
+                && (anyLabel || record.labelKey.contains(labelPattern))
                 && (!hidesJunkAndTrash || (record.role != junk && record.role != trash))
         }
     }
@@ -411,6 +563,7 @@ public actor SwiftDataMessageStore: MessageStore {
         record.gmailMessageID = message.gmailMessageID.map { Int64(bitPattern: $0) }
         record.gmailThreadID = message.gmailThreadID.map { Int64(bitPattern: $0) }
         record.labels = message.labels
+        record.labelKey = labelKey(for: message.labels)
     }
 
     private static func stored(_ record: MailRecord) -> StoredMessage {

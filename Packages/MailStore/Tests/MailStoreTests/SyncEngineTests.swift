@@ -208,6 +208,44 @@ import Testing
         return server
     }
 
+    /// Gmail の自分で作ったラベルを覚える (アカウントを選んだときにサイドバーに出す、T13)。
+    /// Gmail のシステムのフォルダ (`[Gmail]/...`、`INBOX`) と、入れ物だけのフォルダは入れない。
+    @Test func gmailRemembersTheLabelsYouMade() async throws {
+        let store = InMemoryMessageStore()
+        let server = await gmailServer()
+        await server.addFolder("仕事")
+        await server.addFolder("仕事/経理")
+        await server.addFolder("Work")
+        await server.addFolder("[Google Mail]/Important")
+        await server.addFolder("Parent", selectable: false)
+        _ = try await engine(store).sync(account: gmail, session: server)
+
+        #expect(try await store.labels(account: gmail.id) == ["Work", "仕事", "仕事/経理"])
+    }
+
+    /// ラベルを Gmail で消したら、次の同期で一覧からも消える。
+    @Test func gmailLabelListFollowsTheServer() async throws {
+        let store = InMemoryMessageStore()
+        let engine = engine(store)
+        let server = await gmailServer()
+        await server.addFolder("仕事")
+        _ = try await engine.sync(account: gmail, session: server)
+        #expect(try await store.labels(account: gmail.id) == ["仕事"])
+
+        _ = try await engine.sync(account: gmail, session: await gmailServer())
+        #expect(try await store.labels(account: gmail.id) == [])
+    }
+
+    /// Gmail 以外のサーバーには「ラベル」がないので、何も覚えない (自分で作ったフォルダは、まだ扱わない)。
+    @Test func otherServersHaveNoLabels() async throws {
+        let store = InMemoryMessageStore()
+        let server = await yahooServer()
+        await server.addFolder("Projects")
+        _ = try await engine(store).sync(account: yahoo, session: server)
+
+        #expect(try await store.labels(account: yahoo.id) == [])
+    }
+
     @Test func gmailSyncsAllMailSpamAndTrashOnly() async throws {
         let server = await gmailServer()
         let targets = SyncEngine.targets(for: .gmail, mailboxes: try await server.listMailboxes())

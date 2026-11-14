@@ -11,6 +11,13 @@ final class InboxModel {
         var id: AccountID { account.id }
     }
 
+    /// アカウントを選んでいるときに出す、そのアカウントの Gmail のラベル (T13)。
+    struct LabelItem: Identifiable {
+        let name: String
+        let unreadCount: Int
+        var id: String { name }
+    }
+
     struct FolderItem: Identifiable {
         let role: MailboxRole
         /// 受信トレイ・未読は未読数、下書きは件数。
@@ -20,6 +27,8 @@ final class InboxModel {
 
     private(set) var accounts: [AccountItem] = []
     private(set) var folders: [FolderItem] = []
+    /// 選んでいるアカウントのラベル。統合のフォルダを見ているときは空。
+    private(set) var labels: [LabelItem] = []
     private(set) var unifiedUnreadCount = 0
     private(set) var messages: [MessageSummary] = []
     private(set) var selection: MailboxSelection = .unified(.inbox)
@@ -82,11 +91,35 @@ final class InboxModel {
         } catch {
             errorMessage = String(describing: error)
         }
+        await refreshLabels()
+    }
+
+    /// 選んでいるアカウントのラベルと、その未読数を読み直す。
+    /// 開いていたラベルが Gmail で消されていたら、そのアカウントの受信トレイに戻す。
+    private func refreshLabels() async {
+        guard let accountID = selection.accountID else {
+            labels = []
+            return
+        }
+        do {
+            var items: [LabelItem] = []
+            for name in try await repository.labels(for: accountID) {
+                items.append(LabelItem(name: name, unreadCount: try await repository.unreadCount(in: .label(accountID, name))))
+            }
+            labels = items
+            if let label = selection.label, !items.contains(where: { $0.name == label }) {
+                selection = .account(accountID, .inbox)
+            }
+        } catch {
+            errorMessage = String(describing: error)
+        }
     }
 
     func select(_ newSelection: MailboxSelection) async {
         guard newSelection != selection else { return }
+        let accountChanged = newSelection.accountID != selection.accountID
         selection = newSelection
+        if accountChanged { await refreshLabels() }
         await reloadMessages()
     }
 
@@ -281,7 +314,8 @@ final class InboxModel {
     }
 
     var title: String {
-        Self.folderName(selection.role)
+        if let label = selection.label { return label }
+        return selection.role.map(Self.folderName) ?? ""
     }
 
     var subtitle: String {

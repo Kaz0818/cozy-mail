@@ -7,6 +7,8 @@ public protocol MailRepository: Sendable {
     /// 新しい順に並べて返す。
     func messages(in selection: MailboxSelection, filter: MessageFilter) async throws -> [MessageSummary]
     func unreadCount(in selection: MailboxSelection) async throws -> Int
+    /// そのアカウントの Gmail のラベル (自分で作ったもの)。名前順。
+    func labels(for account: AccountID) async throws -> [String]
     /// 本文。必要ならサーバーから取る。
     func body(for id: MessageID) async throws -> MessageBody
     /// 添付ファイルの中身 (`Attachment.index` で指定)。
@@ -27,6 +29,11 @@ public enum SendOutcome: Sendable, Equatable {
 }
 
 extension MailRepository {
+    /// ラベルを扱わない窓口 (見本のメール、テスト用のものなど) の既定: ラベルはない。
+    public func labels(for account: AccountID) async throws -> [String] {
+        []
+    }
+
     /// 送信に対応していない窓口 (テスト用のものなど) の既定: できない。
     public func replySource(for id: MessageID) async throws -> ReplySource {
         throw MailRepositoryError.actionUnavailable
@@ -64,14 +71,18 @@ public enum MailRepositoryError: Error, Equatable {
 
 extension MailboxSelection {
     /// このフォルダにメールが含まれるかどうか。仮想フォルダの条件もここで決める。
-    func contains(_ message: MessageSummary) -> Bool {
+    /// - Parameter labels: そのメールの Gmail のラベル (`StoredMessage.labels`)。ラベルを選んでいるときだけ使う。
+    func contains(_ message: MessageSummary, labels: [String] = []) -> Bool {
         if let accountID, message.accountID != accountID { return false }
-        switch role {
-        case .starred:
+        switch self {
+        case let .label(_, name):
+            // Gmail の Web 版と同じく、迷惑メールとゴミ箱のメールはラベルの一覧に出さない
+            return labels.contains(name) && message.mailbox != .trash && message.mailbox != .junk
+        case .unified(.starred), .account(_, .starred):
             return message.isStarred && message.mailbox != .trash && message.mailbox != .junk
-        case .unread:
+        case .unified(.unread), .account(_, .unread):
             return !message.isRead && message.mailbox == .inbox
-        default:
+        case let .unified(role), let .account(_, role):
             return message.mailbox == role
         }
     }
