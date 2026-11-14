@@ -349,7 +349,38 @@ import Testing
         #expect(try await reopened.rawMessage(for: item.summary.id) == big + [1])
     }
 
+    /// 大きい本文はデータベースの外のファイルになる。メールやアカウントを消したら、そのファイルもディスクから消える。
+    @Test func deletingRemovesBodyFilesFromDisk() async throws {
+        let folder = Folder()
+        let store = try open(folder)
+        let big = Data((0 ..< 1024 * 1024).map { UInt8(truncatingIfNeeded: $0 &* 7) })
+        let messages = [message(1, account: yahoo), message(2, account: yahoo), message(3, account: gmail)]
+        try await store.upsert(messages)
+        for item in messages {
+            try await store.setRawMessage(big + Data(item.summary.id.rawValue.utf8), for: item.summary.id)
+        }
+        #expect(try externalFileCount(in: folder.url) == 3)
+
+        try await store.delete(account: yahoo, mailbox: "INBOX", uids: [1])
+        #expect(try externalFileCount(in: folder.url) == 2)
+
+        try await store.deleteAccount(yahoo)
+        #expect(try externalFileCount(in: folder.url) == 1)
+
+        // 本文を上書きしても、古いファイルは残らない
+        try await store.setRawMessage(big + [9], for: messages[2].summary.id)
+        #expect(try externalFileCount(in: folder.url) == 1)
+        #expect(try await open(folder).rawMessage(for: messages[2].summary.id) == big + [9])
+    }
+
     // MARK: - 補助
+
+    /// SwiftData がデータベースの外に置いたファイルの数。
+    private func externalFileCount(in directory: URL) throws -> Int {
+        let external = directory.appendingPathComponent(".Mail_SUPPORT/_EXTERNAL_DATA", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: external.path) else { return 0 }
+        return try FileManager.default.contentsOfDirectory(atPath: external.path).count
+    }
 
     /// アプリと同じく、`MessageStore` として使う。
     private func open(_ folder: Folder) throws -> any MessageStore {

@@ -204,7 +204,7 @@
 
 ### T10: 保存と同期
 
-> 状態 (2026-11-14): ✅ **同期処理、メモリ上の保存先、SwiftData の保存先 (`SwiftDataMessageStore`) すべて済**。アプリの保存先は SwiftData に差し替えた (開けないときだけメモリ上に切り替わる)。Mac の `xcodebuild test -scheme MailStore-Package` で全 110 件が通過 (うち SwiftData のテスト 15 件)。アプリのテストは単体 59 件 + UI 6 件。
+> 状態 (2026-11-14): 🐧 **同期処理、メモリ上の保存先、SwiftData の保存先 (`SwiftDataMessageStore`) は済**。アプリの保存先は SwiftData に差し替えた (開けないときだけメモリ上に切り替わる)。Mac の `xcodebuild test -scheme MailStore-Package` で全 111 件が通過 (うち SwiftData のテスト 16 件)。アプリのテストは単体 59 件 + UI 6 件。**残り:** メールがたまると画面が重くなる問題 (下の「未解決」)、🍎 オーナーの確認。
 > - Gmail は「すべてのメール」「迷惑メール」「ゴミ箱」だけを同期し、受信トレイなどの区別はラベルで決める (二重に出ない)。
 > - SPECIAL-USE のないサーバー (Yahoo! など) は、フォルダ名 (Sent / Draft / Bulk Mail / 送信済み など) から役割を推し量る。
 > - 受信トレイの未読数は、同期のたびにサーバーに直接聞く (`STATUS (UNSEEN)`)。保存外の古い未読も含めて、サーバーの数と一致する。
@@ -227,10 +227,12 @@
 - [x] 未読数がサーバー側の数と一致する (受信トレイ。`STATUS (UNSEEN)`)
 - [x] アプリを終了して開き直しても、メール・同期の進み具合・未読数・本文が残り、開き直したあとは新着だけを受信する (`SwiftDataMessageStoreTests`)
 - [x] 何年分 (5 年・6,000 通) 置いても、フォルダごとの取り出しと件数が合う (`yearsOfMailStayQueryable`)
+- [ ] 何年分たまっても、画面がもたつかない — **未解決** (1 万通で画面の更新に 4 秒。下の「確認」には含めていない)
+- [x] メールやアカウントを消すと、ディスク上の本文のファイルも消える (`deletingRemovesBodyFilesFromDisk`)
 
 **確認:**
 - [x] 🐧 `swift test --package-path Packages/MailStore` (2026-11-13 時点で 87 件すべて通過。SwiftData のテストは Linux では空)
-- [x] 🐧 `cd Packages/MailStore && xcodebuild test -scheme MailStore-Package -destination 'platform=macOS'` (Mac で実行。2026-11-14 に 110 件すべて通過)
+- [x] 🐧 `cd Packages/MailStore && xcodebuild test -scheme MailStore-Package -destination 'platform=macOS'` (Mac で実行。2026-11-14 に 111 件すべて通過)
 - [x] 🐧 `xcodebuild test -scheme CozyMail -destination 'platform=macOS'` (2026-11-14 に単体 59 件 + UI 6 件すべて通過)
 - [ ] 🍎 アプリを閉じて開き直すと、前回の一覧がすぐ出て、開いたことのあるメールは本文も出る (2026-11-14 に Claude が Mac で確認済み。キーチェーンの確認が出たままでも出た。オーナーの確認待ち)
 
