@@ -238,7 +238,7 @@
 **確認:**
 - [x] 🐧 `swift test --package-path Packages/MailStore` (2026-11-13 時点で 87 件すべて通過。SwiftData のテストは Linux では空)
 - [x] 🐧 `cd Packages/MailStore && xcodebuild test -scheme MailStore-Package -destination 'platform=macOS'` (Mac で実行。2026-11-14 に 113 件すべて通過)
-- [x] 🐧 `xcodebuild test -scheme CozyMail -destination 'platform=macOS'` (2026-11-14 に単体 59 件 + UI 6 件すべて通過。重さの修正のあとは単体 59 件のみ通過を確認。UI テストは、画面にキーチェーンの確認が出ていて起動できなかった)
+- [x] 🐧 `xcodebuild test -scheme CozyMail -destination 'platform=macOS'` (2026-11-14 に単体 59 件 + UI 6 件すべて通過。重さの修正のあとも、単体 59 件 + UI 6 件すべて通過)
 - [ ] 🍎 アプリを閉じて開き直すと、前回の一覧がすぐ出て、開いたことのあるメールは本文も出る (2026-11-14 に Claude が Mac で確認済み。キーチェーンの確認が出たままでも出た。オーナーの確認待ち)
 
 **依存:** T7, T8
