@@ -7,8 +7,19 @@ struct CozyMailApp: App {
     static let composeWindowID = "compose"
 
     @AppStorage(AppTheme.storageKey) private var themeRawValue = AppTheme.system.rawValue
-    /// 画面の自動テスト (`-ui-testing` で起動) では、本物のアカウントやキーチェーンに触れないよう、メモリ上だけで動かす。
-    @State private var service = ProcessInfo.processInfo.arguments.contains("-ui-testing") ? MailService.preview() : MailService.live()
+    /// 自動テストでは、本物のアカウント・キーチェーン・保存ファイルに触れないよう、メモリ上だけで動かす。
+    @State private var service = isAutomatedTest(ProcessInfo.processInfo) ? MailService.preview() : MailService.live()
+
+    /// 自動テストで起動されたかどうか。
+    /// - 画面のテスト: `-ui-testing` を付けて起動する。
+    /// - 単体テスト: このアプリを起動して、その中でテストが動く。そのとき XCTest が `XCTestConfigurationFilePath` を設定する。
+    static func isAutomatedTest(_ process: ProcessInfo) -> Bool {
+        isAutomatedTest(arguments: process.arguments, environment: process.environment)
+    }
+
+    static func isAutomatedTest(arguments: [String], environment: [String: String]) -> Bool {
+        arguments.contains("-ui-testing") || environment["XCTestConfigurationFilePath"] != nil
+    }
 
     var body: some Scene {
         WindowGroup(id: Self.mainWindowID) {
