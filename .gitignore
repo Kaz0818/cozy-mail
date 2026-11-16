@@ -1,5 +1,7 @@
 # Xcode (project.yml から生成する)
 *.xcodeproj/
+# アプリの権限ファイル。project.yml の properties から xcodegen が作る
+App/CozyMail.entitlements
 *.xcworkspace/
 xcuserdata/
 DerivedData/
@@ -11,6 +13,10 @@ build/
 
 # 個人の設定
 Local.xcconfig
+# 作業用のスキル (エージェント用の道具。アプリの一部ではない)
+.agents/
+.claude/skills/
+skills-lock.json
 
 # macOS
 .DS_Store
