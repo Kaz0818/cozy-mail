@@ -140,5 +140,15 @@ final class MessageListUITests: XCTestCase {
                        "件名が「Re: 企画のご提案について」にならない: \(String(describing: subject.value))")
         XCTAssertEqual(app.textFields["compose.to"].value as? String, "山田 さくら <s.yamada@example.com>")
     }
+
+    /// T33: 設定の「一般」に、外部の画像をいつも表示する差出人の欄が出る (見本ではまだ空)。
+    @MainActor
+    func testGeneralSettingsListsTrustedImageSenders() throws {
+        let app = launch()
+        app.typeKey(",", modifierFlags: .command)
+
+        XCTAssertTrue(app.staticTexts["外部の画像をいつも表示する差出人"].waitForExistence(timeout: 5), "設定に欄が出ない")
+        XCTAssertTrue(app.staticTexts["まだありません。"].exists)
+    }
 }
 
