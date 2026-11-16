@@ -49,6 +49,9 @@ final class MailService {
     let directory: AccountDirectory
     /// アカウントごとの署名 (T25)。
     let signatures: SignatureStore
+    /// 外部の画像をいつも表示する差出人 (T33、小文字のアドレス)。本文の画面は待たずに読むので、作ったときに読み込んでおく。
+    private(set) var trustedImageSenders: Set<String>
+    @ObservationIgnored private let imageSenders: TrustedImageSenderStore
     /// Mac に保存した下書き (T23a)。
     let drafts: DraftStore
     /// オフラインの待ち行列 (T22)。つながらないときの整理の操作をためて、同期の前に送る。
@@ -122,6 +125,7 @@ final class MailService {
         directory: AccountDirectory, store: any MessageStore, watchesForNewMail: Bool = false,
         notifications: NotificationHooks = .none,
         signatures: SignatureStore = SignatureStore(storage: InMemoryAccountListStorage()),
+        imageSenders: TrustedImageSenderStore = TrustedImageSenderStore(storage: InMemoryAccountListStorage()),
         undoSendDelay: @escaping @MainActor () -> Duration = { .zero },
         drafts: DraftStore = DraftStore(
             directory: FileManager.default.temporaryDirectory.appendingPathComponent("CozyMailDrafts-\(UUID().uuidString)")
@@ -134,6 +138,8 @@ final class MailService {
         self.directory = directory
         self.pendingActions = pendingActions
         self.signatures = signatures
+        self.imageSenders = imageSenders
+        trustedImageSenders = imageSenders.addresses()
         self.drafts = drafts
         self.store = store
         self.watchesForNewMail = watchesForNewMail
@@ -165,6 +171,7 @@ final class MailService {
                 post: { notifier.post($0) }
             ),
             signatures: .live(),
+            imageSenders: .live(),
             undoSendDelay: { UndoSendSetting.delay(in: .standard) },
             drafts: makeLiveDrafts(),
             serverDrafts: ServerDraftHooks(
@@ -550,6 +557,23 @@ final class MailService {
     /// 署名を保存する (T25)。空なら消す。
     func setSignature(_ signature: String, for id: AccountID) async throws {
         try await signatures.setSignature(signature, for: id)
+    }
+
+    // MARK: - 外部の画像をいつも表示する差出人 (T33)
+
+    func showsImages(from address: String) -> Bool {
+        TrustedImageSenderStore.key(for: address).map { trustedImageSenders.contains($0) } ?? false
+    }
+
+    /// 空のアドレスは覚えない。
+    func trustImages(from address: String) throws {
+        try imageSenders.trust(address)
+        trustedImageSenders = imageSenders.addresses()
+    }
+
+    func stopTrustingImages(from address: String) throws {
+        try imageSenders.remove(address)
+        trustedImageSenders = imageSenders.addresses()
     }
 
     /// アカウントを削除する。パスワードと、保存していたメールと、署名も消える。

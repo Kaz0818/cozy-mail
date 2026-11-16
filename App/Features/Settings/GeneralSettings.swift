@@ -50,6 +50,7 @@ final class LoginItemSettingsModel {
 
 /// 設定の「一般」(T21)。
 struct GeneralSettings: View {
+    @Environment(MailService.self) private var service
     @State private var model = LoginItemSettingsModel(item: SystemLoginItem())
     @AppStorage(UndoSendSetting.key) private var undoSeconds = UndoSendSetting.defaultSeconds
 
@@ -76,8 +77,54 @@ struct GeneralSettings: View {
                     .font(.callout)
                     .foregroundStyle(.red)
             }
+            TrustedImageSendersSection(service: service)
         }
         .formStyle(.grouped)
         .frame(width: 420)
+    }
+}
+
+/// 外部の画像をいつも表示する差出人の一覧と、外すボタン (T33)。
+private struct TrustedImageSendersSection: View {
+    let service: MailService
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Section {
+            if service.trustedImageSenders.isEmpty {
+                Text("まだありません。")
+                    .foregroundStyle(Palette.textSecondary)
+            }
+            ForEach(service.trustedImageSenders.sorted(), id: \.self) { address in
+                HStack {
+                    Text(address)
+                        .foregroundStyle(Palette.textPrimary)
+                        .textSelection(.enabled)
+                    Spacer()
+                    Button("外す") { remove(address) }
+                        .accessibilityIdentifier("settings.trustedImageSender.remove")
+                }
+            }
+            if let errorMessage {
+                Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(Palette.destructive)
+            }
+        } header: {
+            Text("外部の画像をいつも表示する差出人")
+        } footer: {
+            Text("本文の「この差出人は常に表示」で足せます。外部の画像を読み込むと、開いたことを送り主に知られます。差出人のアドレスはなりすませるので、信頼できる相手だけにしてください。")
+                .font(.callout)
+                .foregroundStyle(Palette.textSecondary)
+        }
+    }
+
+    private func remove(_ address: String) {
+        do {
+            try service.stopTrustingImages(from: address)
+            errorMessage = nil
+        } catch {
+            errorMessage = "外せませんでした。(\(error.localizedDescription))"
+        }
     }
 }

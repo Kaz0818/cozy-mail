@@ -57,7 +57,9 @@ struct ReaderView: View {
 private struct MessageContent: View {
     let model: InboxModel
     let message: MessageSummary
+    @Environment(MailService.self) private var service
     @State private var allowsRemoteContent = false
+    @State private var trustError: String?
     @State private var previewURL: URL?
     @State private var attachmentError: String?
     /// 保存する添付ファイル。入れると保存先を選ぶ画面が開く。
@@ -98,10 +100,10 @@ private struct MessageContent: View {
     private var content: some View {
         if let body = model.selectedBody {
             if let html = body.html {
-                if !allowsRemoteContent, SafeHTML.hasRemoteContent(html) {
+                if !showsRemoteContent, SafeHTML.hasRemoteContent(html) {
                     remoteContentBanner
                 }
-                HTMLMessageView(html: html, allowsRemoteContent: allowsRemoteContent)
+                HTMLMessageView(html: html, allowsRemoteContent: showsRemoteContent)
                     .clipShape(RoundedRectangle(cornerRadius: Metrics.rowRadius, style: .continuous))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .padding(.horizontal, 24)
@@ -137,6 +139,12 @@ private struct MessageContent: View {
                     .foregroundStyle(Palette.destructive)
                     .padding(.horizontal, 32)
             }
+            if let trustError {
+                Label(trustError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(Palette.destructive)
+                    .padding(.horizontal, 32)
+            }
         } else if let error = model.bodyError {
             VStack(spacing: 14) {
                 Label(error, systemImage: "exclamationmark.triangle.fill")
@@ -153,6 +161,27 @@ private struct MessageContent: View {
         }
     }
 
+    /// 「この差出人は常に表示」で覚えるアドレス (T33)。アドレスが空のときと、Mac の下書き (差出人の欄に宛先が入る) では出さない。
+    private var trustableSender: String? {
+        LocalDraft.id(from: message.id) == nil ? TrustedImageSenderStore.key(for: message.sender.address) : nil
+    }
+
+    /// このメールで外部の画像を読み込むか。押したときか、差出人を覚えているとき (T33)。
+    private var showsRemoteContent: Bool {
+        allowsRemoteContent || trustableSender.map { service.showsImages(from: $0) } == true
+    }
+
+    /// 覚えられなくても、このメールの画像は出す。
+    private func trust(_ sender: String) {
+        allowsRemoteContent = true
+        do {
+            try service.trustImages(from: sender)
+            trustError = nil
+        } catch {
+            trustError = "この差出人を覚えられませんでした。(\(error.localizedDescription))"
+        }
+    }
+
     /// 外部の画像を読み込んでいないことを知らせ、表示するかどうかを選んでもらう。
     private var remoteContentBanner: some View {
         HStack(spacing: 12) {
@@ -165,6 +194,12 @@ private struct MessageContent: View {
             Spacer()
             Button("画像を表示") { allowsRemoteContent = true }
                 .buttonStyle(.glass)
+            if let sender = trustableSender {
+                Button("この差出人は常に表示") { trust(sender) }
+                    .buttonStyle(.glass)
+                    .help(Text("\(sender) からのメールは、外部の画像をいつも表示します。設定の「一般」で外せます。"))
+                    .accessibilityIdentifier("reader.alwaysShowImages")
+            }
         }
         .padding(12)
         .glassCard()
