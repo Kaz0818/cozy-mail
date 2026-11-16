@@ -72,8 +72,9 @@ xcodebuild test -scheme CozyMail -destination 'platform=macOS'
 
 - プルリクエストでは **Linux のパッケージのテストだけ** が自動で回る (macOS は無料時間を 10 倍の速さで使うため)。
 - macOS のビルドとテストは、main に取り込んだときと、手動実行 (Actions の「Run workflow」でブランチを選ぶ) のときだけ。
-- ローカルで `xcodebuild test` が通っていれば、プルリクエストでの macOS の手動実行は省いてよい。通ったことは報告に書く。
-- クラウドでは `xcodebuild` が使えないので、アプリや SwiftData のコードを変えたら、CI の macOS を手動で動かして結果を確かめる。
+- **アプリや SwiftData のコードを変えたときは、ローカルで `xcodebuild test` が通っていても、プルリクエストで CI の macOS を手動で動かして通す** (まっさらな Mac でも動くことの確認。コミットし忘れたファイルなどを、マージの前に見つけるため。2026-11-16 オーナーの決定)。通ったことは報告に書く。
+- 文書だけの変更や、`Packages/` だけの変更なら、macOS の手動実行は省いてよい。
+- クラウドでは `xcodebuild` が使えないので、アプリや SwiftData のコードを変えたときは、CI の macOS を手動で動かして結果を確かめる。
 
 ## 作りの決まりごと
 
