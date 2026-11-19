@@ -19,3 +19,6 @@ Local.xcconfig
 .agents/
 .claude/skills/
 skills-lock.json
+
+# xcodegen が project.yml から作る (中身は project.yml の entitlements に書く)
+App/CozyMail.entitlements
