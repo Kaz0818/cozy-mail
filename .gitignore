@@ -14,3 +14,8 @@ Local.xcconfig
 
 # macOS
 .DS_Store
+
+# 外部から入れたエージェント用スキル (プロジェクトのコードではない)
+.agents/
+.claude/skills/
+skills-lock.json
